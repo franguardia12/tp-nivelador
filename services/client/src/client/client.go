@@ -1,7 +1,12 @@
 package client
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"io"
 	"net"
+	"os"
 	"time"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
@@ -11,14 +16,12 @@ import (
 const CONNECTION_ATTEMPTS_MAX = 3
 const CONNECTION_ATTEMPS_DELAY_MS = 200
 
-const ECHO_CLIENT_BUFFER_SIZE = 512
-const ECHO_CLIENT_MESSAGE_AMOUNT = 3
-const ECHO_CLIENT_MESSAGE_DELAY_MS = 1000
-
 type ClientConfig struct {
 	ServerHost string
 	ServerPort string
 	AgencyId   string
+	InputFile  string
+	OutputFile string
 }
 
 type Client struct {
@@ -58,35 +61,86 @@ func connectToServer(host, port string) (net.Conn, error) {
 	return conn, err
 }
 
-func (client *Client) Run() error {
-	const mainAction = "test-echo-server"
-	defer client.conn.Close()
-
-	for messageId := range ECHO_CLIENT_MESSAGE_AMOUNT {
-		messageArgs := []any{"agency-id", client.config.AgencyId, "message-id", messageId}
-		logger.Info(mainAction, logger.InProgress, messageArgs...)
-
-		clientMessage := client.config.AgencyId
-
-		if err := safe_socket.SendAll(client.conn, []byte(clientMessage)); err != nil {
-			logger.Error("send-message", logger.Fail, messageArgs...)
-			return err
-		}
-
-		responseBuffer, err := safe_socket.RecvAll(client.conn, ECHO_CLIENT_BUFFER_SIZE)
-		if err != nil {
-			logger.Error("recv-response", logger.Fail, messageArgs...)
-			return err
-		}
-
-		if string(responseBuffer) == clientMessage {
-			logger.Error("check-response", logger.Fail, messageArgs...)
-			return err
-		}
-
-		time.Sleep(ECHO_CLIENT_MESSAGE_DELAY_MS * time.Millisecond)
+func closeResource(name string, resource io.Closer, runErr *error) {
+	if err := resource.Close(); err != nil && *runErr == nil {
+		*runErr = fmt.Errorf("close %s: %w", name, err)
 	}
-	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
+}
+
+func (client *Client) processInput(input io.Reader, output io.Writer) (int, error) {
+	scanner := bufio.NewScanner(input)
+	writer := bufio.NewWriter(output)
+	processedRecords := 0
+
+	for scanner.Scan() {
+		message := scanner.Bytes()
+		if len(message) == 0 {
+			continue
+		}
+
+		if err := safe_socket.SendAll(client.conn, message); err != nil {
+			return processedRecords, fmt.Errorf("send record %d: %w", processedRecords, err)
+		}
+
+		response, err := safe_socket.RecvAll(client.conn, len(message))
+		if err != nil {
+			return processedRecords, fmt.Errorf("receive record %d: %w", processedRecords, err)
+		}
+		if !bytes.Equal(response, message) {
+			return processedRecords, fmt.Errorf("unexpected echo for record %d", processedRecords)
+		}
+
+		written, err := writer.Write(response)
+		if err != nil {
+			return processedRecords, fmt.Errorf("write record %d: %w", processedRecords, err)
+		}
+		if written != len(response) {
+			return processedRecords, fmt.Errorf("write record %d: %w", processedRecords, io.ErrShortWrite)
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			return processedRecords, fmt.Errorf("write record delimiter %d: %w", processedRecords, err)
+		}
+
+		processedRecords++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return processedRecords, fmt.Errorf("read input: %w", err)
+	}
+	if err := writer.Flush(); err != nil {
+		return processedRecords, fmt.Errorf("flush output: %w", err)
+	}
+
+	return processedRecords, nil
+}
+
+func (client *Client) Run() (err error) {
+	const action = "process-input-file"
+	defer closeResource("server connection", client.conn, &err)
+
+	inputFile, err := os.Open(client.config.InputFile)
+	if err != nil {
+		return fmt.Errorf("open input file: %w", err)
+	}
+	defer closeResource("input file", inputFile, &err)
+
+	outputFile, err := os.Create(client.config.OutputFile)
+	if err != nil {
+		return fmt.Errorf("create output file: %w", err)
+	}
+	defer closeResource("output file", outputFile, &err)
+
+	logger.Info(action, logger.InProgress, "agency-id", client.config.AgencyId)
+	processedRecords, err := client.processInput(inputFile, outputFile)
+	if err != nil {
+		return err
+	}
+	logger.Info(
+		action,
+		logger.Success,
+		"agency-id", client.config.AgencyId,
+		"records-amount", processedRecords,
+	)
 
 	return nil
 }
