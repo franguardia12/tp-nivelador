@@ -1,11 +1,32 @@
 import socket
 
-# TODO: Complete with a short-read/short-write tolerant implementation
+
+def recv_all(sock: socket.socket, size: int) -> bytes:
+    if size < 0:
+        raise ValueError(f"invalid read size {size}")
+
+    data = bytearray()
+
+    while len(data) < size:
+        recv_size = size - len(data)
+        # Socket errors are deliberately propagated. Only successful partial
+        # receives are retried; retrying an arbitrary error could loop forever.
+        chunk = sock.recv(recv_size)
+
+        data.extend(chunk)
+
+    return bytes(data)
 
 
-def recv_all(socket: socket.socket, size):
-    return socket.recv(size)
+def send_all(sock: socket.socket, data: bytes) -> None:
+    view = memoryview(data)
+    total_sent = 0
 
+    while total_sent < len(view):
+        # Socket errors are deliberately propagated. Only successful partial
+        # sends are retried; retrying an arbitrary error could loop forever.
+        sent = sock.send(view[total_sent:])            
 
-def send_all(socket: socket.socket, bytes):
-    return socket.send(bytes)
+        total_sent += sent
+
+    return None
