@@ -1,16 +1,17 @@
 package client
 
 import (
-	"bufio"
-	"bytes"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
-	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/model"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
 )
 
 const CONNECTION_ATTEMPTS_MAX = 3
@@ -19,7 +20,7 @@ const CONNECTION_ATTEMPS_DELAY_MS = 200
 type ClientConfig struct {
 	ServerHost string
 	ServerPort string
-	AgencyId   string
+	AgencyID   uint32
 	InputFile  string
 	OutputFile string
 }
@@ -67,51 +68,197 @@ func closeResource(name string, resource io.Closer, runErr *error) {
 	}
 }
 
-func (client *Client) processInput(input io.Reader, output io.Writer) (int, error) {
-	scanner := bufio.NewScanner(input)
-	writer := bufio.NewWriter(output)
+func betFromCSV(record []string) (model.Bet, error) {
+	if len(record) != 5 {
+		return model.Bet{}, fmt.Errorf("expected 5 fields, got %d", len(record))
+	}
+
+	document, err := strconv.ParseUint(record[2], 10, 64)
+	if err != nil {
+		return model.Bet{}, fmt.Errorf("invalid document %q: %w", record[2], err)
+	}
+	number, err := strconv.ParseUint(record[4], 10, 32)
+	if err != nil {
+		return model.Bet{}, fmt.Errorf("invalid number %q: %w", record[4], err)
+	}
+
+	return model.Bet{
+		FirstName: record[0],
+		LastName:  record[1],
+		Document:  document,
+		Birthdate: record[3],
+		Number:    uint32(number),
+	}, nil
+}
+
+func csvFromBet(bet model.Bet) []string {
+	return []string{
+		bet.FirstName,
+		bet.LastName,
+		strconv.FormatUint(bet.Document, 10),
+		bet.Birthdate,
+		strconv.FormatUint(uint64(bet.Number), 10),
+	}
+}
+
+func serverError(message protocol.Message) error {
+	protocolError, err := protocol.DecodeError(message.Payload)
+	if err != nil {
+		return fmt.Errorf("decode server error: %w", err)
+	}
+	return fmt.Errorf(
+		"server rejected message 0x%02x with code %d: %s",
+		uint8(protocolError.FailedType),
+		protocolError.Code,
+		protocolError.Detail,
+	)
+}
+
+func (client *Client) expectAck(expectedType protocol.MessageType, expectedCount uint32) error {
+	message, err := protocol.ReceiveMessage(client.conn)
+	if err != nil {
+		return err
+	}
+	if message.Type == protocol.MessageTypeError {
+		return serverError(message)
+	}
+	if message.Type != protocol.MessageTypeAck {
+		return fmt.Errorf(
+			"unexpected response type 0x%02x while waiting for ACK",
+			uint8(message.Type),
+		)
+	}
+
+	ack, err := protocol.DecodeAck(message.Payload)
+	if err != nil {
+		return fmt.Errorf("decode ACK: %w", err)
+	}
+	if ack.AcknowledgedType != expectedType {
+		return fmt.Errorf(
+			"ACK confirms message 0x%02x, expected 0x%02x",
+			uint8(ack.AcknowledgedType),
+			uint8(expectedType),
+		)
+	}
+	if ack.ProcessedCount != expectedCount {
+		return fmt.Errorf(
+			"ACK reports %d processed records, expected %d",
+			ack.ProcessedCount,
+			expectedCount,
+		)
+	}
+	return nil
+}
+
+func (client *Client) registerAgency() error {
+	payload := protocol.EncodeAgency(client.config.AgencyID)
+	if err := protocol.SendMessage(client.conn, protocol.MessageTypeAgency, payload); err != nil {
+		return fmt.Errorf("send agency: %w", err)
+	}
+	if err := client.expectAck(protocol.MessageTypeAgency, 0); err != nil {
+		return fmt.Errorf("register agency: %w", err)
+	}
+	return nil
+}
+
+func (client *Client) sendBet(bet model.Bet) error {
+	payload, err := protocol.EncodeBets([]model.Bet{bet})
+	if err != nil {
+		return fmt.Errorf("encode bet: %w", err)
+	}
+	if err := protocol.SendMessage(client.conn, protocol.MessageTypeBets, payload); err != nil {
+		return fmt.Errorf("send bet: %w", err)
+	}
+	if err := client.expectAck(protocol.MessageTypeBets, 1); err != nil {
+		return fmt.Errorf("store bet: %w", err)
+	}
+	return nil
+}
+
+func (client *Client) sendInput(input io.Reader) (int, error) {
+	reader := csv.NewReader(input)
+	reader.FieldsPerRecord = 5
 	processedRecords := 0
 
-	for scanner.Scan() {
-		message := scanner.Bytes()
-		if len(message) == 0 {
-			continue
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			return processedRecords, nil
 		}
-
-		if err := safe_socket.SendAll(client.conn, message); err != nil {
-			return processedRecords, fmt.Errorf("send record %d: %w", processedRecords, err)
-		}
-
-		response, err := safe_socket.RecvAll(client.conn, len(message))
 		if err != nil {
-			return processedRecords, fmt.Errorf("receive record %d: %w", processedRecords, err)
-		}
-		if !bytes.Equal(response, message) {
-			return processedRecords, fmt.Errorf("unexpected echo for record %d", processedRecords)
+			return processedRecords, fmt.Errorf("read record %d: %w", processedRecords, err)
 		}
 
-		written, err := writer.Write(response)
+		bet, err := betFromCSV(record)
 		if err != nil {
-			return processedRecords, fmt.Errorf("write record %d: %w", processedRecords, err)
+			return processedRecords, fmt.Errorf("parse record %d: %w", processedRecords, err)
 		}
-		if written != len(response) {
-			return processedRecords, fmt.Errorf("write record %d: %w", processedRecords, io.ErrShortWrite)
+		if err := client.sendBet(bet); err != nil {
+			return processedRecords, fmt.Errorf("process record %d: %w", processedRecords, err)
 		}
-		if err := writer.WriteByte('\n'); err != nil {
-			return processedRecords, fmt.Errorf("write record delimiter %d: %w", processedRecords, err)
-		}
-
 		processedRecords++
 	}
+}
 
-	if err := scanner.Err(); err != nil {
-		return processedRecords, fmt.Errorf("read input: %w", err)
+func (client *Client) finishSendingBets() error {
+	if err := protocol.SendMessage(client.conn, protocol.MessageTypeEndBets, nil); err != nil {
+		return fmt.Errorf("send end of bets: %w", err)
 	}
-	if err := writer.Flush(); err != nil {
-		return processedRecords, fmt.Errorf("flush output: %w", err)
-	}
+	return nil
+}
 
-	return processedRecords, nil
+func (client *Client) receiveWinners(output io.Writer) (uint32, error) {
+	writer := csv.NewWriter(output)
+	var receivedCount uint32
+
+	for {
+		message, err := protocol.ReceiveMessage(client.conn)
+		if err != nil {
+			return receivedCount, err
+		}
+
+		switch message.Type {
+		case protocol.MessageTypeWinner:
+			bet, err := protocol.DecodeBet(message.Payload)
+			if err != nil {
+				return receivedCount, fmt.Errorf("decode winner %d: %w", receivedCount, err)
+			}
+			if receivedCount == ^uint32(0) {
+				return receivedCount, fmt.Errorf("winner count exceeds uint32")
+			}
+			if err := writer.Write(csvFromBet(bet)); err != nil {
+				return receivedCount, fmt.Errorf("write winner %d: %w", receivedCount, err)
+			}
+			receivedCount++
+
+		case protocol.MessageTypeWinnersEnd:
+			expectedCount, err := protocol.DecodeWinnersEnd(message.Payload)
+			if err != nil {
+				return receivedCount, fmt.Errorf("decode winners end: %w", err)
+			}
+			if expectedCount != receivedCount {
+				return receivedCount, fmt.Errorf(
+					"received %d winners, server reported %d",
+					receivedCount,
+					expectedCount,
+				)
+			}
+			writer.Flush()
+			if err := writer.Error(); err != nil {
+				return receivedCount, fmt.Errorf("flush winners: %w", err)
+			}
+			return receivedCount, nil
+
+		case protocol.MessageTypeError:
+			return receivedCount, serverError(message)
+
+		default:
+			return receivedCount, fmt.Errorf(
+				"unexpected response type 0x%02x while receiving winners",
+				uint8(message.Type),
+			)
+		}
+	}
 }
 
 func (client *Client) Run() (err error) {
@@ -130,16 +277,27 @@ func (client *Client) Run() (err error) {
 	}
 	defer closeResource("output file", outputFile, &err)
 
-	logger.Info(action, logger.InProgress, "agency-id", client.config.AgencyId)
-	processedRecords, err := client.processInput(inputFile, outputFile)
+	logger.Info(action, logger.InProgress, "agency-id", client.config.AgencyID)
+	if err := client.registerAgency(); err != nil {
+		return err
+	}
+	processedRecords, err := client.sendInput(inputFile)
+	if err != nil {
+		return err
+	}
+	if err := client.finishSendingBets(); err != nil {
+		return err
+	}
+	winnerCount, err := client.receiveWinners(outputFile)
 	if err != nil {
 		return err
 	}
 	logger.Info(
 		action,
 		logger.Success,
-		"agency-id", client.config.AgencyId,
+		"agency-id", client.config.AgencyID,
 		"records-amount", processedRecords,
+		"winners-amount", winnerCount,
 	)
 
 	return nil
