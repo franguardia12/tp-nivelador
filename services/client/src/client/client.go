@@ -14,8 +14,8 @@ import (
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
 )
 
-const CONNECTION_ATTEMPTS_MAX = 3
-const CONNECTION_ATTEMPS_DELAY_MS = 200
+const connectionAttemptsMax = 10
+const connectionAttemptDelay = 500 * time.Millisecond
 
 type ClientConfig struct {
 	ServerHost string
@@ -47,11 +47,13 @@ func connectToServer(host, port string) (net.Conn, error) {
 	var conn net.Conn
 
 	logger.Info(action, logger.InProgress)
-	for i := range CONNECTION_ATTEMPTS_MAX {
+	for i := range connectionAttemptsMax {
 		conn, err = net.Dial("tcp", host+":"+port)
 		if err != nil {
 			logger.Warn(action, logger.Fail, "attempt", i)
-			time.Sleep(CONNECTION_ATTEMPS_DELAY_MS * time.Millisecond)
+			if i+1 < connectionAttemptsMax {
+				time.Sleep(connectionAttemptDelay)
+			}
 			continue
 		}
 
