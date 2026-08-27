@@ -7,11 +7,9 @@ once per connection. Decoding adds that session value to the domain Bet.
 from lottery import Bet
 
 from .framing import MAX_PAYLOAD_SIZE
+from .primitives import MAX_STRING_SIZE, MAX_UINT32, MAX_UINT64, encode_uint
 
-MAX_STRING_SIZE = (1 << 16) - 1
 MINIMUM_ENCODED_BET_SIZE = 18
-MAX_UINT32 = (1 << 32) - 1
-MAX_UINT64 = (1 << 64) - 1
 
 
 class _BetDecoder:
@@ -60,20 +58,10 @@ def _encode_string(field_name: str, value: str) -> bytes:
     return len(encoded_value).to_bytes(2, "big") + encoded_value
 
 
-def _encode_uint(field_name: str, value: int, size: int, maximum: int) -> bytes:
-    """Validate and encode an unsigned integer using big-endian order."""
-
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{field_name} must be an integer")
-    if value < 0 or value > maximum:
-        raise ValueError(f"{field_name} is outside the uint{size * 8} range")
-    return value.to_bytes(size, "big")
-
-
 def _validate_agency_id(agency_id: int) -> None:
     """Validate the session agency before adding it to decoded domain bets."""
 
-    _encode_uint("agency id", agency_id, 4, MAX_UINT32)
+    encode_uint("agency id", agency_id, 4, MAX_UINT32)
 
 
 def _decode_bet(decoder: _BetDecoder, agency_id: int) -> Bet:
@@ -94,9 +82,9 @@ def encode_bet(bet: Bet) -> bytes:
         [
             _encode_string("first name", bet.first_name),
             _encode_string("last name", bet.last_name),
-            _encode_uint("document", bet.document, 8, MAX_UINT64),
+            encode_uint("document", bet.document, 8, MAX_UINT64),
             _encode_string("birthdate", bet.birthdate),
-            _encode_uint("number", bet.number, 4, MAX_UINT32),
+            encode_uint("number", bet.number, 4, MAX_UINT32),
         ]
     )
 
