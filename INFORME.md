@@ -37,6 +37,40 @@ La longitud no incluye los 5 bytes del encabezado. El receptor primero obtiene e
 encabezado completo, valida el tipo y la longitud, y luego recibe exactamente el
 payload declarado.
 
+### Justificación de las decisiones de diseño
+
+TCP entrega un flujo de bytes y no conserva los límites entre escrituras. Por eso
+se eligió un framing con longitud explícita en lugar de depender de una lectura,
+de delimitadores que podrían aparecer en los datos o de mensajes de tamaño fijo.
+Un byte para el tipo permite representar hasta 256 clases de mensaje, suficiente
+para el protocolo actual y sus extensiones previstas. Los cuatro bytes de longitud
+permiten describir payloads variables y lotes futuros; el límite operativo de 16
+MiB no forma parte de la capacidad teórica del campo, sino que evita reservar
+memoria sin una cota ante un encabezado inválido.
+
+Las longitudes `uint16` de los strings permiten validar y recorrer cada apuesta
+sin separadores ambiguos, mientras que `uint32` y `uint64` cubren los dominios
+esperados para identificadores, números y documentos. El identificador de agencia
+se envía una sola vez porque pertenece a la sesión y no a cada apuesta. A su vez,
+el contador incluido en `BETS` permite incorporar el envío por lotes
+sin cambiar la representación de una apuesta ni el framing general.
+
+Cada cliente mantiene una única conexión durante toda la sesión. Los `ACK`
+confirman que el servidor terminó de procesar la operación correspondiente, y
+`END_BETS` marca el cambio de la etapa de carga a la de resultados. Después de
+enviarlo, el cliente realiza una recepción bloqueante: no consulta periódicamente
+ni envía mensajes auxiliares mientras espera el primer ganador. Los ganadores se
+transmiten individualmente y `WINNERS_END` delimita la secuencia, lo que permite
+procesarlos y escribirlos de manera incremental sin acumular la lista completa en
+memoria.
+
+El almacenamiento temporal del servidor proporciona la ruta de archivo requerida
+por `Lottery`. Una misma instancia se comparte entre las conexiones atendidas por
+el proceso, por lo que las apuestas permanecen disponibles entre sesiones
+sucesivas sin abrir una conexión nueva por cada recurso. El directorio se elimina
+automáticamente cuando termina el servidor; no se utiliza como mecanismo de
+comunicación entre cliente y servidor.
+
 ### Tipos de mensajes
 
 | Valor | Nombre | Dirección | Propósito |
@@ -74,8 +108,8 @@ Contiene únicamente el identificador de agencia como `uint32`.
 #### `BETS`
 
 Comienza con la cantidad de apuestas como `uint32`, seguida por esa cantidad de
-apuestas serializadas. En el ejercicio 5 cada mensaje contiene una sola apuesta.
-Esta representación permite que el ejercicio de procesamiento por lotes aumente
+apuestas serializadas. Inicialmente cada mensaje contiene una sola apuesta.
+Esta representación permite que el procesamiento por lotes aumente
 la cantidad sin modificar el framing ni la serialización individual.
 
 No se admite una cantidad igual a cero. El servidor decodifica y valida todo el
@@ -151,10 +185,13 @@ intercambio de mensajes y no de esperas temporales prefijadas.
 
 ### Manejo de errores y recursos
 
-Un EOF antes de completar un encabezado o payload se considera una comunicación
-incompleta. Los errores de socket se propagan y no se reintentan de manera
-indefinida. Cuando la conexión todavía es utilizable, el servidor intenta enviar
-un mensaje `ERROR`; luego registra el problema y cierra la sesión.
+La finalización de una lectura o escritura se determina al acumular exactamente la
+cantidad esperada de bytes. Si una operación no avanza pero tampoco informa un
+error, no se considera completa mientras todavía falten bytes y se vuelve a
+intentar según el contrato adoptado para el ejercicio. Los errores informados por
+el socket antes de completar un encabezado o payload se propagan. Cuando la
+conexión todavía es utilizable, el servidor intenta enviar un mensaje `ERROR`;
+luego registra el problema y cierra la sesión.
 
 Los errores se devuelven por el flujo normal de las funciones, sin forzar la salida
 desde los módulos internos. Los archivos y sockets quedan bajo mecanismos de

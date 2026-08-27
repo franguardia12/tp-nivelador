@@ -1,5 +1,22 @@
 # TP Nivelador: Docker, Comunicaciones y Concurrencia
 
+Franco Guardia - 109374
+
+## Resolución del ejercicio 5
+
+Se reemplazó el _echo_ inicial por un protocolo binario propio sobre una conexión
+TCP persistente por cliente. Cada mensaje contiene un encabezado con su tipo y la
+longitud del payload; los datos de la agencia, las apuestas, las confirmaciones y
+los ganadores se serializan explícitamente, sin utilizar bibliotecas de
+serialización.
+
+El cliente registra su agencia, lee el archivo de entrada de manera incremental y
+envía cada apuesta esperando la confirmación de que fue almacenada. Al finalizar,
+notifica al servidor y queda bloqueado esperando los resultados de este, que
+persiste las apuestas mediante `Lottery` y transmite únicamente los ganadores de
+esa agencia. La secuencia termina con un mensaje que informa la cantidad total de
+ganadores, tras lo cual el cliente finaliza la escritura del archivo de salida.
+
 ## Introducción
 
 El objetivo de este trabajo es tanto repasar conceptos fundamentales de la concurrencia y la comunicación, como introducir a los estudiantes al desarrollo de sistemas distribuídos, en donde el código de las partes que lo componen se encapsulan en _containers_, orquestados en este caso por la herramienta [Docker Compose](https://docs.docker.com/compose/).
