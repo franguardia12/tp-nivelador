@@ -7,9 +7,10 @@ lotería y un servidor escrito en Python que representa la central de Lotería
 Nacional. Los procesos se comunican mediante sockets TCP y un protocolo binario
 propio. No se utilizan bibliotecas de serialización ni formatos como JSON.
 
-Cada cliente procesa su archivo de entrada de manera incremental. El servidor
-persiste las apuestas mediante el modelo de dominio provisto y devuelve únicamente
-los ganadores pertenecientes a la agencia que abrió la conexión.
+Cada cliente procesa su archivo de entrada de manera incremental y agrupa las
+apuestas en lotes configurables. El servidor persiste las apuestas mediante el
+modelo de dominio provisto y devuelve únicamente los ganadores pertenecientes a la
+agencia que abrió la conexión.
 
 ## Protocolo de comunicación
 
@@ -18,9 +19,6 @@ los ganadores pertenecientes a la agencia que abrió la conexión.
 - Los enteros son sin signo y se codifican en orden de red (big-endian).
 - Las longitudes de strings representan bytes UTF-8, no caracteres.
 - Todos los mensajes poseen un encabezado fijo y un payload de longitud variable.
-- El tamaño máximo de un payload es 16 MiB. Un encabezado que declare una longitud
-  mayor se considera inválido y se rechaza antes de reservar memoria para el
-  payload.
 - `send_all` y `recv_all` se emplean para transferir exactamente la cantidad de
   bytes requerida, contemplando short writes y short reads.
 
@@ -44,16 +42,16 @@ se eligió un framing con longitud explícita en lugar de depender de una lectur
 de delimitadores que podrían aparecer en los datos o de mensajes de tamaño fijo.
 Un byte para el tipo permite representar hasta 256 clases de mensaje, suficiente
 para el protocolo actual y sus extensiones previstas. Los cuatro bytes de longitud
-permiten describir payloads variables y lotes futuros; el límite operativo de 16
-MiB no forma parte de la capacidad teórica del campo, sino que evita reservar
-memoria sin una cota ante un encabezado inválido.
+permiten describir payloads variables mediante un `uint32`. No se impone un límite
+operativo adicional que reduzca la cantidad configurada mediante `BATCH_SIZE`; la
+única cota del payload es la que surge de su representación en el encabezado.
 
 Las longitudes `uint16` de los strings permiten validar y recorrer cada apuesta
 sin separadores ambiguos, mientras que `uint32` y `uint64` cubren los dominios
 esperados para identificadores, números y documentos. El identificador de agencia
 se envía una sola vez porque pertenece a la sesión y no a cada apuesta. A su vez,
-el contador incluido en `BETS` permite incorporar el envío por lotes
-sin cambiar la representación de una apuesta ni el framing general.
+el contador incluido en `BETS` permite enviar lotes sin cambiar la representación
+de una apuesta ni el framing general.
 
 Cada cliente mantiene una única conexión durante toda la sesión. Los `ACK`
 confirman que el servidor terminó de procesar la operación correspondiente, y
@@ -108,12 +106,44 @@ Contiene únicamente el identificador de agencia como `uint32`.
 #### `BETS`
 
 Comienza con la cantidad de apuestas como `uint32`, seguida por esa cantidad de
-apuestas serializadas. Inicialmente cada mensaje contiene una sola apuesta.
-Esta representación permite que el procesamiento por lotes aumente
-la cantidad sin modificar el framing ni la serialización individual.
+apuestas serializadas. La cantidad máxima de registros agrupados por el cliente se
+configura mediante `BATCH_SIZE`; el último mensaje puede contener una cantidad
+menor si el archivo no completa otro lote. `BATCH_SIZE` expresa una cantidad de
+registros y constituye el único límite configurable para formar los lotes.
 
 No se admite una cantidad igual a cero. El servidor decodifica y valida todo el
 payload antes de intentar almacenarlo.
+
+### Procesamiento por lotes
+
+El cliente requiere que `BATCH_SIZE` esté definido y valida que sea un entero
+positivo. Lee y convierte los registros de a uno, manteniendo en memoria únicamente
+el lote actual. Cuando alcanza el tamaño configurado, lo serializa dentro de un
+solo mensaje `BETS`, espera su `ACK` y reutiliza el espacio para el lote siguiente.
+No se dividen apuestas entre mensajes ni se agrega padding para completar un
+tamaño fijo.
+
+Si una fila no posee la estructura CSV esperada, contiene campos numéricos
+inválidos o no puede representarse con el formato del protocolo, el cliente la
+omite y registra el índice y el motivo. Las demás apuestas continúan procesándose y
+la fila inválida nunca se incorpora a un mensaje `BETS`.
+
+El servidor deserializa y valida todas las apuestas antes de invocar
+`Lottery.store_bets` una sola vez con la lista completa. El `ACK` se envía solamente
+si esa llamada finaliza correctamente e informa la misma cantidad de registros que
+el cliente envió. Un error de decodificación impide que el lote llegue a la capa de
+dominio; un error de almacenamiento produce `ERROR` y no una confirmación exitosa.
+
+Un payload malformado detectado por el servidor se rechaza completo y la sesión
+finaliza. Como las apuestas tienen campos de longitud variable y no poseen una
+longitud total individual, después de un error estructural no siempre es posible
+ubicar con seguridad el inicio de la apuesta siguiente. Tampoco se retransmite
+automáticamente el mismo lote: un error de protocolo volvería a producir el mismo
+resultado y un reintento tras un fallo de almacenamiento podría duplicar registros.
+La interfaz provista por `Lottery` no ofrece una operación de rollback, por lo que
+ante un fallo de escritura el servidor no confirma el lote, aunque tampoco puede
+deshacer registros que el método hubiera alcanzado a persistir antes de informar
+el error.
 
 #### `END_BETS`
 
@@ -171,7 +201,7 @@ El diálogo normal es:
 Cliente                                      Servidor
    | ----------- AGENCY ----------------------> |
    | <---------- ACK --------------------------- |
-   | ----------- BETS (una apuesta) ----------> |
+   | -------- BETS (hasta BATCH_SIZE) --------> |
    | <---------- ACK --------------------------- |
    |                      ...                    |
    | ----------- END_BETS --------------------> |

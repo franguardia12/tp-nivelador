@@ -2,20 +2,19 @@
 
 Franco Guardia - 109374
 
-## Resolución del ejercicio 5
+## Resolución del ejercicio 6
 
-Se reemplazó el _echo_ inicial por un protocolo binario propio sobre una conexión
-TCP persistente por cliente. Cada mensaje contiene un encabezado con su tipo y la
-longitud del payload; los datos de la agencia, las apuestas, las confirmaciones y
-los ganadores se serializan explícitamente, sin utilizar bibliotecas de
-serialización.
+Se incorporó el envío de apuestas por lotes configurables mediante la variable de
+entorno `BATCH_SIZE`. El cliente continúa leyendo el archivo de entrada de manera
+incremental, acumula como máximo esa cantidad de registros y envía cada grupo en
+un único mensaje `BETS`. Al llegar al final también transmite el último lote aunque
+contenga menos registros. Los registros inválidos detectados durante la lectura se
+omiten y se informa el motivo mediante un log.
 
-El cliente registra su agencia, lee el archivo de entrada de manera incremental y
-envía cada apuesta esperando la confirmación de que fue almacenada. Al finalizar,
-notifica al servidor y queda bloqueado esperando los resultados de este, que
-persiste las apuestas mediante `Lottery` y transmite únicamente los ganadores de
-esa agencia. La secuencia termina con un mensaje que informa la cantidad total de
-ganadores, tras lo cual el cliente finaliza la escritura del archivo de salida.
+El servidor deserializa y valida el mensaje completo antes de almacenar el lote
+mediante una única llamada a `Lottery.store_bets`. Solamente después de que esa
+operación finaliza responde con un `ACK` que contiene la cantidad procesada, valor
+que el cliente verifica antes de avanzar al siguiente lote.
 
 ## Introducción
 
