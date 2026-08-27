@@ -1,6 +1,5 @@
 from .framing import (
     HEADER_SIZE,
-    MAX_PAYLOAD_SIZE,
     Message,
     MessageType,
     receive_message,
@@ -22,7 +21,6 @@ from .control import (
 
 __all__ = [
     "HEADER_SIZE",
-    "MAX_PAYLOAD_SIZE",
     "Message",
     "MessageType",
     "receive_message",
