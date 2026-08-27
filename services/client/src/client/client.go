@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,7 @@ type ClientConfig struct {
 	ServerHost string
 	ServerPort string
 	AgencyID   uint32
+	BatchSize  uint32
 	InputFile  string
 	OutputFile string
 }
@@ -163,43 +165,97 @@ func (client *Client) registerAgency() error {
 	return nil
 }
 
-func (client *Client) sendBet(bet model.Bet) error {
-	payload, err := protocol.EncodeBets([]model.Bet{bet})
+func (client *Client) sendBatch(bets []model.Bet) error {
+	payload, err := protocol.EncodeBets(bets)
 	if err != nil {
-		return fmt.Errorf("encode bet: %w", err)
+		return fmt.Errorf("encode batch: %w", err)
 	}
 	if err := protocol.SendMessage(client.conn, protocol.MessageTypeBets, payload); err != nil {
-		return fmt.Errorf("send bet: %w", err)
+		return fmt.Errorf("send batch: %w", err)
 	}
-	if err := client.expectAck(protocol.MessageTypeBets, 1); err != nil {
-		return fmt.Errorf("store bet: %w", err)
+	if err := client.expectAck(protocol.MessageTypeBets, uint32(len(bets))); err != nil {
+		return fmt.Errorf("store batch: %w", err)
 	}
 	return nil
+}
+
+func logSkippedBet(recordIndex int, err any) {
+	logger.Warn(
+		"skip-invalid-bet",
+		logger.Fail,
+		"record", recordIndex,
+		"err", err,
+	)
 }
 
 func (client *Client) sendInput(input io.Reader) (int, error) {
 	reader := csv.NewReader(input)
 	reader.FieldsPerRecord = 5
 	processedRecords := 0
+	recordIndex := 0
+	batch := make([]model.Bet, 0)
+
+	flushBatch := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := client.sendBatch(batch); err != nil {
+			return err
+		}
+		processedRecords += len(batch)
+		batch = batch[:0]
+		return nil
+	}
 
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
-			return processedRecords, nil
+			break
 		}
+		currentRecordIndex := recordIndex
+		recordIndex++
 		if err != nil {
-			return processedRecords, fmt.Errorf("read record %d: %w", processedRecords, err)
+			var parseError *csv.ParseError
+			if errors.As(err, &parseError) {
+				logSkippedBet(currentRecordIndex, err)
+				continue
+			}
+			return processedRecords, fmt.Errorf(
+				"read record %d: %w",
+				currentRecordIndex,
+				err,
+			)
 		}
 
 		bet, err := betFromCSV(record)
 		if err != nil {
-			return processedRecords, fmt.Errorf("parse record %d: %w", processedRecords, err)
+			logSkippedBet(currentRecordIndex, err)
+			continue
 		}
-		if err := client.sendBet(bet); err != nil {
-			return processedRecords, fmt.Errorf("process record %d: %w", processedRecords, err)
+
+		_, err = protocol.EncodeBet(bet)
+		if err != nil {
+			logSkippedBet(currentRecordIndex, err)
+			continue
 		}
-		processedRecords++
+
+		batch = append(batch, bet)
+
+		if uint32(len(batch)) == client.config.BatchSize {
+			if err := flushBatch(); err != nil {
+				return processedRecords, fmt.Errorf("process count-limited batch: %w", err)
+			}
+		}
 	}
+
+	if err := flushBatch(); err != nil {
+		return processedRecords, fmt.Errorf(
+			"process final batch: %w",
+			err,
+		)
+	}
+
+	return processedRecords, nil
 }
 
 func (client *Client) finishSendingBets() error {

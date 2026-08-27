@@ -9,7 +9,6 @@ import (
 )
 
 const HeaderSize = 5
-const MaxPayloadSize = 16 * 1024 * 1024
 
 type MessageType uint8
 
@@ -47,11 +46,10 @@ func SendMessage(writer io.Writer, messageType MessageType, payload []byte) erro
 	if !isKnownMessageType(messageType) {
 		return fmt.Errorf("unknown message type 0x%02x", uint8(messageType))
 	}
-	if len(payload) > MaxPayloadSize {
+	if uint64(len(payload)) > uint64(^uint32(0)) {
 		return fmt.Errorf(
-			"payload length %d exceeds maximum %d",
+			"payload length %d cannot be represented by uint32",
 			len(payload),
-			MaxPayloadSize,
 		)
 	}
 
@@ -78,11 +76,12 @@ func ReceiveMessage(reader io.Reader) (Message, error) {
 	}
 
 	payloadSize := binary.BigEndian.Uint32(header[1:HeaderSize])
-	if payloadSize > uint32(MaxPayloadSize) {
+	maxInt := uint64(^uint(0) >> 1)
+	if uint64(payloadSize) > maxInt {
 		return Message{}, fmt.Errorf(
-			"payload length %d exceeds maximum %d",
+			"payload length %d exceeds platform capacity %d",
 			payloadSize,
-			MaxPayloadSize,
+			maxInt,
 		)
 	}
 

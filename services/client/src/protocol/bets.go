@@ -11,6 +11,9 @@ import (
 const maxStringSize = 1<<16 - 1
 const minimumEncodedBetSize = 18
 
+// BetsCountSize is the byte size of the record count prefix in a BETS payload.
+const BetsCountSize = 4
+
 type betDecoder struct {
 	data   []byte
 	offset int
@@ -136,14 +139,6 @@ func EncodeBet(bet model.Bet) ([]byte, error) {
 
 // DecodeBet deserializes a payload that must contain exactly one complete bet.
 func DecodeBet(payload []byte) (model.Bet, error) {
-	if len(payload) > MaxPayloadSize {
-		return model.Bet{}, fmt.Errorf(
-			"payload length %d exceeds maximum %d",
-			len(payload),
-			MaxPayloadSize,
-		)
-	}
-
 	decoder := betDecoder{data: payload}
 	bet, err := decodeBet(&decoder)
 	if err != nil {
@@ -167,19 +162,12 @@ func EncodeBets(bets []model.Bet) ([]byte, error) {
 		return nil, fmt.Errorf("bet count %d exceeds uint32", len(bets))
 	}
 
-	payload := make([]byte, 4)
+	payload := make([]byte, BetsCountSize)
 	binary.BigEndian.PutUint32(payload, uint32(len(bets)))
 	for index, bet := range bets {
 		encodedBet, err := EncodeBet(bet)
 		if err != nil {
 			return nil, fmt.Errorf("encode bet %d: %w", index, err)
-		}
-		if len(payload)+len(encodedBet) > MaxPayloadSize {
-			return nil, fmt.Errorf(
-				"payload length exceeds maximum %d while encoding bet %d",
-				MaxPayloadSize,
-				index,
-			)
 		}
 		payload = append(payload, encodedBet...)
 	}
@@ -189,22 +177,15 @@ func EncodeBets(bets []model.Bet) ([]byte, error) {
 // DecodeBets deserializes exactly the declared number of bets and rejects any
 // truncated records or bytes left after the final record.
 func DecodeBets(payload []byte) ([]model.Bet, error) {
-	if len(payload) > MaxPayloadSize {
-		return nil, fmt.Errorf(
-			"payload length %d exceeds maximum %d",
-			len(payload),
-			MaxPayloadSize,
-		)
-	}
-	if len(payload) < 4 {
+	if len(payload) < BetsCountSize {
 		return nil, fmt.Errorf("incomplete bet count")
 	}
 
-	count := binary.BigEndian.Uint32(payload[:4])
+	count := binary.BigEndian.Uint32(payload[:BetsCountSize])
 	if count == 0 {
 		return nil, fmt.Errorf("bets payload cannot be empty")
 	}
-	remainingSize := len(payload) - 4
+	remainingSize := len(payload) - BetsCountSize
 	if uint64(count)*minimumEncodedBetSize > uint64(remainingSize) {
 		return nil, fmt.Errorf(
 			"bet count %d does not fit in payload of %d bytes",
@@ -213,7 +194,7 @@ func DecodeBets(payload []byte) ([]model.Bet, error) {
 		)
 	}
 
-	decoder := betDecoder{data: payload, offset: 4}
+	decoder := betDecoder{data: payload, offset: BetsCountSize}
 	bets := make([]model.Bet, 0, int(count))
 	for index := uint32(0); index < count; index++ {
 		bet, err := decodeBet(&decoder)
