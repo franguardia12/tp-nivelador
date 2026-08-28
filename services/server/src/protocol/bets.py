@@ -111,7 +111,7 @@ def encode_bets(bets: list[Bet]) -> bytes:
         raise ValueError(f"bet count {len(bets)} exceeds uint32")
 
     encoded_bets: list[bytes] = []
-    for bet in bets:
+    for index, bet in enumerate(bets):
         try:
             encoded_bet = encode_bet(bet)
         except ValueError as error:
