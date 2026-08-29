@@ -8,9 +8,9 @@ Nacional. Los procesos se comunican mediante sockets TCP y un protocolo binario
 propio. No se utilizan bibliotecas de serialización ni formatos como JSON.
 
 Cada cliente procesa su archivo de entrada de manera incremental y agrupa las
-apuestas en lotes configurables. El servidor persiste las apuestas mediante el
-modelo de dominio provisto y devuelve únicamente los ganadores pertenecientes a la
-agencia que abrió la conexión.
+apuestas en lotes configurables. El servidor crea un proceso por conexión, persiste
+las apuestas mediante el modelo de dominio provisto y devuelve únicamente los
+ganadores pertenecientes a la agencia que abrió la conexión.
 
 ## Protocolo de comunicación
 
@@ -63,9 +63,9 @@ procesarlos y escribirlos de manera incremental sin acumular la lista completa e
 memoria.
 
 El almacenamiento temporal del servidor proporciona la ruta de archivo requerida
-por `Lottery`. Una misma instancia se comparte entre las conexiones atendidas por
-el proceso, por lo que las apuestas permanecen disponibles entre sesiones
-sucesivas sin abrir una conexión nueva por cada recurso. El directorio se elimina
+por `Lottery`. Los procesos heredan instancias configuradas con esa misma ruta, por
+lo que las apuestas persisten en un único almacenamiento externo a sus memorias y
+permanecen disponibles entre sesiones sucesivas. El directorio se elimina
 automáticamente cuando termina el servidor; no se utiliza como mecanismo de
 comunicación entre cliente y servidor.
 
@@ -145,6 +145,70 @@ ante un fallo de escritura el servidor no confirma el lote, aunque tampoco puede
 deshacer registros que el método hubiera alcanzado a persistir antes de informar
 el error.
 
+## Concurrencia y sincronización
+
+### Modelo de ejecución
+
+El servidor emplea un proceso padre coordinador y un proceso hijo por conexión.
+El padre no procesa mensajes de clientes: utiliza
+`multiprocessing.connection.wait` para esperar simultáneamente sobre el socket de
+escucha, las conexiones de control y los descriptores que informan la finalización
+de los hijos. De esta forma puede aceptar conexiones, actualizar el quorum y
+recolectar procesos sin polling. Cada hijo es dueño del socket aceptado durante
+toda la sesión y lo cierra al finalizar.
+
+Los workers se crean con `multiprocessing` usando explícitamente el método
+`spawn`. Cada proceso comienza con un intérprete nuevo y recibe solamente el
+socket TCP, el extremo de su conexión de control y la configuración de
+almacenamiento que necesita. El padre cierra sus copias del socket aceptado y del
+extremo destinado al hijo inmediatamente después de iniciarlo. Los procesos
+terminados se recolectan mediante `join`, evitando procesos zombie.
+
+Se eligió multiprocessing para permitir paralelismo real entre sesiones y evitar
+que el GIL de CPython condicione la ejecución de sus tramos de procesamiento. No se
+utilizan `Queue`, `Manager`, futures, asyncio ni memoria Python compartida. La
+biblioteca `multiprocessing` crea los procesos y proporciona los objetos `Pipe` y
+`Connection` empleados para el IPC. Los file locks continúan actuando directamente
+sobre el almacenamiento del sistema operativo.
+
+### Protección de Lottery
+
+El `threading.Lock` no es válido entre procesos porque cada hijo recibiría una
+copia independiente. Por eso los accesos al almacenamiento de `Lottery` se
+coordinan mediante `flock` sobre un archivo de lock asociado. Cada llamada a
+`store_bets` mantiene un lock exclusivo hasta finalizar. La iteración de
+`load_bets` mantiene un lock compartido durante todo el recorrido: varios procesos
+pueden leer ganadores simultáneamente, pero un escritor no puede modificar el CSV
+mientras está siendo interpretado. Las apuestas continúan procesándose de manera
+incremental y no se carga el archivo completo en memoria.
+
+### Quorum de agencias
+
+El mensaje `END_BETS` actúa como notificación de que una agencia terminó de cargar
+sus apuestas. El servidor mantiene un conjunto de identificadores finalizados, por
+lo que conexiones repetidas de una misma agencia no incrementan el quorum. El
+mínimo se obtiene de la variable obligatoria `AGENCY_QUORUM_MIN`, que debe ser un
+entero positivo.
+
+Cada worker posee un `multiprocessing.Pipe` dúplex y conserva uno de sus extremos;
+el otro pertenece al padre. Después de recibir `END_BETS`, el hijo envía el
+`agency_id` como cuatro bytes mediante `send_bytes` y queda bloqueado en
+`recv_bytes`. Como el conjunto de agencias finalizadas pertenece solamente al
+padre, no necesita memoria compartida ni un lock adicional. El padre consume cada
+notificación, registra el identificador una sola vez y, al alcanzar el mínimo,
+envía un token de un byte a todos los workers que esperan.
+
+Se utilizan `send_bytes` y `recv_bytes` en lugar de `send` y `recv`, por lo que no
+se serializan objetos Python mediante pickle. `Connection` conserva los límites
+de cada mensaje y el receptor valida que la notificación mida cuatro bytes y que
+el token sea el acordado. Tanto `recv_bytes` como
+`multiprocessing.connection.wait` son bloqueantes: no hay busy wait ni períodos
+prefijados. El quorum funciona como un latch de una sola dirección, por lo que los
+workers que lleguen después de su apertura también se liberan inmediatamente.
+
+El sorteo se calcula por sesión y los resultados se filtran por `agency_id`. No se
+realiza un broadcast global de ganadores.
+
 #### `END_BETS`
 
 No posee payload.
@@ -190,10 +254,12 @@ El servidor mantiene los siguientes estados por conexión:
 1. `WAITING_AGENCY`: solamente acepta `AGENCY` y responde `ACK`.
 2. `RECEIVING_BETS`: acepta cero o más mensajes `BETS`, responde un `ACK` por cada
    uno y finalmente acepta `END_BETS`.
-3. `SENDING_WINNERS`: recorre las apuestas almacenadas, filtra por la agencia de
+3. `WAITING_QUORUM`: registra la agencia terminada y espera a que se alcance
+   `AGENCY_QUORUM_MIN`.
+4. `SENDING_WINNERS`: recorre las apuestas almacenadas, filtra por la agencia de
    la sesión y aplica la condición de ganador. Envía cada resultado mediante
    `WINNER` y termina con `WINNERS_END`.
-4. `FINISHED`: la comunicación de la sesión terminó y se cierra el socket.
+5. `FINISHED`: la comunicación de la sesión terminó y se cierra el socket.
 
 El diálogo normal es:
 
@@ -205,6 +271,7 @@ Cliente                                      Servidor
    | <---------- ACK --------------------------- |
    |                      ...                    |
    | ----------- END_BETS --------------------> |
+   |          (espera bloqueante del quorum)     |
    | <---------- WINNER ------------------------ |
    |                      ...                    |
    | <---------- WINNERS_END ------------------- |

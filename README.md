@@ -2,19 +2,22 @@
 
 Franco Guardia - 109374
 
-## Resolución del ejercicio 6
+## Resolución del ejercicio 7
 
-Se incorporó el envío de apuestas por lotes configurables mediante la variable de
-entorno `BATCH_SIZE`. El cliente continúa leyendo el archivo de entrada de manera
-incremental, acumula como máximo esa cantidad de registros y envía cada grupo en
-un único mensaje `BETS`. Al llegar al final también transmite el último lote aunque
-contenga menos registros. Los registros inválidos detectados durante la lectura se
-omiten y se informa el motivo mediante un log.
+El servidor mantiene un proceso padre coordinador y atiende cada conexión en un
+proceso hijo independiente. La creación de workers se realiza con
+`multiprocessing`, mientras que la sincronización utiliza mecanismos del sistema
+operativo expuestos por `multiprocessing`: un `Pipe` por worker, espera bloqueante
+con `multiprocessing.connection.wait` y file locks con `flock`. Los procesos
+terminados se unen y eliminan del registro del padre.
 
-El servidor deserializa y valida el mensaje completo antes de almacenar el lote
-mediante una única llamada a `Lottery.store_bets`. Solamente después de que esa
-operación finaliza responde con un `ACK` que contiene la cantidad procesada, valor
-que el cliente verifica antes de avanzar al siguiente lote.
+Cuando una agencia envía `END_BETS`, su identificador se registra en un conjunto y
+el worker lo notifica al padre mediante un pipe. Luego queda bloqueado esperando
+la respuesta sobre esa misma conexión hasta que la cantidad de agencias distintas
+alcanza `AGENCY_QUORUM_MIN`; el padre libera entonces todos los workers que
+esperan. El archivo de `Lottery` se protege entre procesos mediante locks
+compartidos para lectura y exclusivos para escritura. Cada conexión recibe
+únicamente los ganadores de su propia agencia.
 
 ## Introducción
 
