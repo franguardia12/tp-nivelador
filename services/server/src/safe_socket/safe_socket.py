@@ -2,6 +2,12 @@ import socket
 
 
 def recv_all(sock: socket.socket, size: int) -> bytes:
+    """Receive exactly size bytes, retrying successful partial operations.
+
+    Socket exceptions are propagated. A zero-byte result without an exception is
+    treated as no progress while bytes are still pending.
+    """
+
     if size < 0:
         raise ValueError(f"invalid read size {size}")
 
@@ -19,13 +25,19 @@ def recv_all(sock: socket.socket, size: int) -> bytes:
 
 
 def send_all(sock: socket.socket, data: bytes) -> None:
+    """Send every byte in data, retrying successful partial operations.
+
+    Socket exceptions are propagated, while a zero-byte result without an
+    exception is retried until the requested transfer is complete.
+    """
+
     view = memoryview(data)
     total_sent = 0
 
     while total_sent < len(view):
         # Socket errors are deliberately propagated. Only successful partial
         # sends are retried; retrying an arbitrary error could loop forever.
-        sent = sock.send(view[total_sent:])            
+        sent = sock.send(view[total_sent:])
 
         total_sent += sent
 

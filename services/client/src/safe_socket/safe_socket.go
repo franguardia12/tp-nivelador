@@ -5,6 +5,8 @@ import (
 	"io"
 )
 
+// SendAll keeps writing the remaining suffix until every byte is transferred.
+// Writer errors are returned immediately; successful zero-byte writes are retried.
 func SendAll(socket io.Writer, data []byte) error {
 	totalSent := 0
 
@@ -22,6 +24,8 @@ func SendAll(socket io.Writer, data []byte) error {
 	return nil
 }
 
+// RecvAll reads exactly size bytes, preserving bytes returned together with an
+// error and reporting an early EOF as io.ErrUnexpectedEOF.
 func RecvAll(socket io.Reader, size int) ([]byte, error) {
 	if size < 0 {
 		return nil, fmt.Errorf("invalid read size %d", size)

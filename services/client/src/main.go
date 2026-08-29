@@ -10,6 +10,7 @@ import (
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 )
 
+// loadBatchSize reads and validates the mandatory positive uint32 BATCH_SIZE.
 func loadBatchSize() (uint32, error) {
 	batchSizeValue := os.Getenv("BATCH_SIZE")
 	if batchSizeValue == "" {

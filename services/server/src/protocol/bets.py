@@ -16,6 +16,8 @@ class _BetDecoder:
     """Consume fields sequentially from a shared payload."""
 
     def __init__(self, payload: bytes, offset: int = 0) -> None:
+        """Start decoding payload at the supplied byte offset."""
+
         self.payload = payload
         self.offset = offset
 

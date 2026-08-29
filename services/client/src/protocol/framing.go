@@ -10,6 +10,7 @@ import (
 
 const HeaderSize = 5
 
+// MessageType identifies the purpose and expected payload of a protocol frame.
 type MessageType uint8
 
 const (
@@ -22,11 +23,13 @@ const (
 	MessageTypeError      MessageType = 0xFF
 )
 
+// Message is one decoded frame composed of a known type and its raw payload.
 type Message struct {
 	Type    MessageType
 	Payload []byte
 }
 
+// isKnownMessageType reports whether a value belongs to the protocol vocabulary.
 func isKnownMessageType(messageType MessageType) bool {
 	switch messageType {
 	case MessageTypeAgency,
@@ -42,6 +45,8 @@ func isKnownMessageType(messageType MessageType) bool {
 	}
 }
 
+// SendMessage validates and frames one message, then transfers the complete frame.
+// Payload length must fit in the uint32 field defined by the wire format.
 func SendMessage(writer io.Writer, messageType MessageType, payload []byte) error {
 	if !isKnownMessageType(messageType) {
 		return fmt.Errorf("unknown message type 0x%02x", uint8(messageType))
@@ -64,6 +69,8 @@ func SendMessage(writer io.Writer, messageType MessageType, payload []byte) erro
 	return nil
 }
 
+// ReceiveMessage obtains a complete header and payload and rejects unknown types
+// or lengths that cannot be represented on the current platform.
 func ReceiveMessage(reader io.Reader) (Message, error) {
 	header, err := safe_socket.RecvAll(reader, HeaderSize)
 	if err != nil {

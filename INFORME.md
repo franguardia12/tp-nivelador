@@ -218,7 +218,7 @@ intercambio de mensajes y no de esperas temporales prefijadas.
 La finalización de una lectura o escritura se determina al acumular exactamente la
 cantidad esperada de bytes. Si una operación no avanza pero tampoco informa un
 error, no se considera completa mientras todavía falten bytes y se vuelve a
-intentar según el contrato adoptado para el ejercicio. Los errores informados por
+intentar. Los errores informados por
 el socket antes de completar un encabezado o payload se propagan. Cuando la
 conexión todavía es utilizable, el servidor intenta enviar un mensaje `ERROR`;
 luego registra el problema y cierra la sesión.

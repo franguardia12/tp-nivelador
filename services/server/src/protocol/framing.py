@@ -9,6 +9,8 @@ _MAX_ENCODED_PAYLOAD_LENGTH = (1 << 32) - 1
 
 
 class MessageType(IntEnum):
+    """Message identifiers supported by the wire protocol."""
+
     AGENCY = 0x01
     BETS = 0x02
     END_BETS = 0x03
@@ -20,11 +22,15 @@ class MessageType(IntEnum):
 
 @dataclass(frozen=True)
 class Message:
+    """A decoded frame containing a known type and its raw payload."""
+
     type: MessageType
     payload: bytes
 
 
 def _as_message_type(value: MessageType | int) -> MessageType:
+    """Normalize a numeric value and reject unknown message identifiers."""
+
     try:
         return MessageType(value)
     except ValueError as error:
@@ -32,6 +38,8 @@ def _as_message_type(value: MessageType | int) -> MessageType:
 
 
 def _validate_payload_size(payload_size: int) -> None:
+    """Ensure a payload length fits in the header's uint32 field."""
+
     if payload_size > _MAX_ENCODED_PAYLOAD_LENGTH:
         raise ValueError(
             f"payload length {payload_size} cannot be represented by uint32"
@@ -43,6 +51,8 @@ def send_message(
     message_type: MessageType,
     payload: bytes = b"",
 ) -> None:
+    """Frame and transfer one complete protocol message."""
+
     normalized_type = _as_message_type(message_type)
     _validate_payload_size(len(payload))
 
@@ -51,6 +61,8 @@ def send_message(
 
 
 def receive_message(sock: socket.socket) -> Message:
+    """Receive exactly one frame and return its decoded type and payload."""
+
     header = safe_socket.recv_all(sock, HEADER_SIZE)
     message_type = _as_message_type(header[0])
     payload_size = int.from_bytes(header[1:HEADER_SIZE], "big")

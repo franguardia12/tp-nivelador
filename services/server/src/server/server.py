@@ -15,6 +15,8 @@ class ClientSessionError(Exception):
         code: protocol.ErrorCode,
         detail: str,
     ) -> None:
+        """Store the wire-level context needed to report the session failure."""
+
         super().__init__(detail)
         self.failed_type = failed_type
         self.code = code
@@ -37,6 +39,8 @@ class Server:
         message: protocol.Message,
         expected: str,
     ) -> ClientSessionError:
+        """Build a reportable error for a message received out of order."""
+
         return ClientSessionError(
             failed_type=message.type,
             code=protocol.ErrorCode.UNEXPECTED_MESSAGE,
@@ -45,6 +49,8 @@ class Server:
 
     @staticmethod
     def _receive_message(client_socket: socket.socket) -> protocol.Message:
+        """Receive a frame and translate codec failures into session errors."""
+
         try:
             return protocol.receive_message(client_socket)
         except ValueError as error:
@@ -60,6 +66,8 @@ class Server:
         acknowledged_type: protocol.MessageType,
         processed_count: int,
     ) -> None:
+        """Confirm a request only after its processing has completed."""
+
         payload = protocol.encode_ack(
             protocol.Ack(
                 acknowledged_type=acknowledged_type,
@@ -69,6 +77,8 @@ class Server:
         protocol.send_message(client_socket, protocol.MessageType.ACK, payload)
 
     def _receive_agency(self, client_socket: socket.socket) -> int:
+        """Receive, validate, and acknowledge the session's agency identifier."""
+
         message = self._receive_message(client_socket)
         if message.type != protocol.MessageType.AGENCY:
             raise self._unexpected_message(message, protocol.MessageType.AGENCY.name)
@@ -86,6 +96,8 @@ class Server:
         return agency_id
 
     def _receive_bets(self, client_socket: socket.socket, agency_id: int) -> int:
+        """Receive and persist complete BETS messages until END_BETS arrives."""
+
         stored_count = 0
         while True:
             message = self._receive_message(client_socket)
@@ -119,6 +131,8 @@ class Server:
             stored_count += len(bets)
 
     def _send_winners(self, client_socket: socket.socket, agency_id: int) -> int:
+        """Stream winners for one agency and finish with their declared count."""
+
         winner_count = 0
         for bet in self.lottery.load_bets():
             if bet.agency_id != agency_id or not self.lottery.has_won(bet):
@@ -145,6 +159,8 @@ class Server:
         client_socket: socket.socket,
         session_error: ClientSessionError,
     ) -> None:
+        """Best-effort reporting of a session failure on a usable connection."""
+
         try:
             payload = protocol.encode_error(
                 protocol.ErrorPayload(

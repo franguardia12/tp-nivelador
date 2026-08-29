@@ -14,11 +14,15 @@ ERROR_PAYLOAD_MINIMUM_SIZE = 5
 
 @dataclass(frozen=True)
 class Ack:
+    """A request acknowledgement and its processed-record count."""
+
     acknowledged_type: MessageType
     processed_count: int
 
 
 class ErrorCode(IntEnum):
+    """Protocol error categories exchanged with clients."""
+
     MALFORMED_MESSAGE = 1
     UNEXPECTED_MESSAGE = 2
     INVALID_DATA = 3
@@ -27,6 +31,8 @@ class ErrorCode(IntEnum):
 
 @dataclass(frozen=True)
 class ErrorPayload:
+    """The request, category, and human-readable detail of a protocol error."""
+
     failed_type: int
     code: ErrorCode
     detail: str
@@ -50,6 +56,8 @@ def decode_agency(payload: bytes) -> int:
 
 
 def _as_acknowledged_type(value: MessageType | int) -> MessageType:
+    """Normalize a message type that is valid inside an ACK payload."""
+
     try:
         message_type = MessageType(value)
     except ValueError as error:
@@ -98,6 +106,8 @@ def decode_winners_end(payload: bytes) -> int:
 
 
 def _as_failed_type(value: MessageType | int) -> int:
+    """Normalize an ERROR request type, allowing zero when it is unknown."""
+
     if value == 0:
         return 0
     try:
@@ -107,6 +117,8 @@ def _as_failed_type(value: MessageType | int) -> int:
 
 
 def _as_error_code(value: ErrorCode | int) -> ErrorCode:
+    """Normalize and validate an ERROR category."""
+
     try:
         return ErrorCode(value)
     except ValueError as error:

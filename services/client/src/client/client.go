@@ -66,12 +66,15 @@ func connectToServer(host, port string) (net.Conn, error) {
 	return conn, err
 }
 
+// closeResource closes a resource and preserves an earlier execution error. A
+// close failure becomes the returned error only when no previous error exists.
 func closeResource(name string, resource io.Closer, runErr *error) {
 	if err := resource.Close(); err != nil && *runErr == nil {
 		*runErr = fmt.Errorf("close %s: %w", name, err)
 	}
 }
 
+// betFromCSV validates and converts one five-field CSV record into a domain Bet.
 func betFromCSV(record []string) (model.Bet, error) {
 	if len(record) != 5 {
 		return model.Bet{}, fmt.Errorf("expected 5 fields, got %d", len(record))
@@ -95,6 +98,7 @@ func betFromCSV(record []string) (model.Bet, error) {
 	}, nil
 }
 
+// csvFromBet converts a domain Bet into the field order used by output files.
 func csvFromBet(bet model.Bet) []string {
 	return []string{
 		bet.FirstName,
@@ -105,6 +109,7 @@ func csvFromBet(bet model.Bet) []string {
 	}
 }
 
+// serverError converts a protocol ERROR response into a local descriptive error.
 func serverError(message protocol.Message) error {
 	protocolError, err := protocol.DecodeError(message.Payload)
 	if err != nil {
@@ -118,6 +123,7 @@ func serverError(message protocol.Message) error {
 	)
 }
 
+// expectAck receives and validates the acknowledgement for one client request.
 func (client *Client) expectAck(expectedType protocol.MessageType, expectedCount uint32) error {
 	message, err := protocol.ReceiveMessage(client.conn)
 	if err != nil {
@@ -154,6 +160,8 @@ func (client *Client) expectAck(expectedType protocol.MessageType, expectedCount
 	return nil
 }
 
+// registerAgency associates the connection with the configured agency and waits
+// until the server confirms the registration.
 func (client *Client) registerAgency() error {
 	payload := protocol.EncodeAgency(client.config.AgencyID)
 	if err := protocol.SendMessage(client.conn, protocol.MessageTypeAgency, payload); err != nil {
@@ -165,6 +173,8 @@ func (client *Client) registerAgency() error {
 	return nil
 }
 
+// sendBatch serializes one non-empty group of bets, sends it in a single BETS
+// message, and verifies that the server processed every record.
 func (client *Client) sendBatch(bets []model.Bet) error {
 	payload, err := protocol.EncodeBets(bets)
 	if err != nil {
@@ -179,6 +189,7 @@ func (client *Client) sendBatch(bets []model.Bet) error {
 	return nil
 }
 
+// logSkippedBet records an invalid input row without interrupting later rows.
 func logSkippedBet(recordIndex int, err any) {
 	logger.Warn(
 		"skip-invalid-bet",
@@ -188,6 +199,8 @@ func logSkippedBet(recordIndex int, err any) {
 	)
 }
 
+// sendInput reads input incrementally, skips invalid records, and sends groups of
+// at most BatchSize bets. The returned count includes only acknowledged records.
 func (client *Client) sendInput(input io.Reader) (int, error) {
 	reader := csv.NewReader(input)
 	reader.FieldsPerRecord = 5
@@ -258,6 +271,7 @@ func (client *Client) sendInput(input io.Reader) (int, error) {
 	return processedRecords, nil
 }
 
+// finishSendingBets notifies the server that the client will send no more BETS.
 func (client *Client) finishSendingBets() error {
 	if err := protocol.SendMessage(client.conn, protocol.MessageTypeEndBets, nil); err != nil {
 		return fmt.Errorf("send end of bets: %w", err)
@@ -265,6 +279,8 @@ func (client *Client) finishSendingBets() error {
 	return nil
 }
 
+// receiveWinners consumes the streamed winner sequence, writes each record to
+// output, and verifies the count declared by WINNERS_END.
 func (client *Client) receiveWinners(output io.Writer) (uint32, error) {
 	writer := csv.NewWriter(output)
 	var receivedCount uint32

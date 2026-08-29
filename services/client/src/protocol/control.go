@@ -11,11 +11,13 @@ const ackPayloadSize = 5
 const winnersEndPayloadSize = 4
 const errorPayloadMinimumSize = 5
 
+// Ack describes which request was acknowledged and how many bets were processed.
 type Ack struct {
 	AcknowledgedType MessageType
 	ProcessedCount   uint32
 }
 
+// ErrorCode classifies protocol, validation, and processing failures.
 type ErrorCode uint16
 
 const (
@@ -25,6 +27,7 @@ const (
 	ErrorCodeInternal          ErrorCode = 4
 )
 
+// ErrorPayload contains the request associated with an error and a UTF-8 detail.
 type ErrorPayload struct {
 	FailedType MessageType
 	Code       ErrorCode
@@ -107,10 +110,12 @@ func DecodeWinnersEnd(payload []byte) (uint32, error) {
 	return binary.BigEndian.Uint32(payload), nil
 }
 
+// isKnownErrorCode reports whether a code is part of the protocol specification.
 func isKnownErrorCode(code ErrorCode) bool {
 	return code >= ErrorCodeMalformedMessage && code <= ErrorCodeInternal
 }
 
+// isKnownFailedType accepts known message types and zero for unidentified frames.
 func isKnownFailedType(messageType MessageType) bool {
 	return messageType == 0 || isKnownMessageType(messageType)
 }
