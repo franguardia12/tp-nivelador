@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
@@ -28,12 +30,14 @@ type ClientConfig struct {
 }
 
 type Client struct {
-	conn   net.Conn
-	config ClientConfig
+	conn      net.Conn
+	config    ClientConfig
+	closeOnce sync.Once
+	closeErr  error
 }
 
-func NewClient(config ClientConfig) (*Client, error) {
-	conn, err := connectToServer(config.ServerHost, config.ServerPort)
+func NewClient(ctx context.Context, config ClientConfig) (*Client, error) {
+	conn, err := connectToServer(ctx, config.ServerHost, config.ServerPort)
 	if err != nil {
 		logger.Warn("connect-to-server", logger.Fail)
 		return nil, err
@@ -43,18 +47,28 @@ func NewClient(config ClientConfig) (*Client, error) {
 	return client, nil
 }
 
-func connectToServer(host, port string) (net.Conn, error) {
+func connectToServer(ctx context.Context, host, port string) (net.Conn, error) {
 	const action = "connect-to-server"
 	var err error
 	var conn net.Conn
 
 	logger.Info(action, logger.InProgress)
 	for i := range connectionAttemptsMax {
-		conn, err = net.Dial("tcp", host+":"+port)
+		var dialer net.Dialer
+		conn, err = dialer.DialContext(ctx, "tcp", host+":"+port)
 		if err != nil {
 			logger.Warn(action, logger.Fail, "attempt", i)
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if i+1 < connectionAttemptsMax {
-				time.Sleep(connectionAttemptDelay)
+				retryTimer := time.NewTimer(connectionAttemptDelay)
+				select {
+				case <-ctx.Done():
+					retryTimer.Stop()
+					return nil, ctx.Err()
+				case <-retryTimer.C:
+				}
 			}
 			continue
 		}
@@ -66,11 +80,23 @@ func connectToServer(host, port string) (net.Conn, error) {
 	return conn, err
 }
 
+// Close releases the server connection once, even when normal cleanup races
+// with cancellation triggered by SIGTERM.
+func (client *Client) Close() error {
+	client.closeOnce.Do(func() {
+		client.closeErr = client.conn.Close()
+	})
+	return client.closeErr
+}
+
 // closeResource closes a resource and preserves an earlier execution error. A
 // close failure becomes the returned error only when no previous error exists.
 func closeResource(name string, resource io.Closer, runErr *error) {
-	if err := resource.Close(); err != nil && *runErr == nil {
-		*runErr = fmt.Errorf("close %s: %w", name, err)
+	if err := resource.Close(); err != nil {
+		logger.Error("close-resource", logger.Fail, "resource", name, "err", err)
+		if *runErr == nil {
+			*runErr = fmt.Errorf("close %s: %w", name, err)
+		}
 	}
 }
 
@@ -201,7 +227,7 @@ func logSkippedBet(recordIndex int, err any) {
 
 // sendInput reads input incrementally, skips invalid records, and sends groups of
 // at most BatchSize bets. The returned count includes only acknowledged records.
-func (client *Client) sendInput(input io.Reader) (int, error) {
+func (client *Client) sendInput(ctx context.Context, input io.Reader) (int, error) {
 	reader := csv.NewReader(input)
 	reader.FieldsPerRecord = 5
 	processedRecords := 0
@@ -221,6 +247,9 @@ func (client *Client) sendInput(input io.Reader) (int, error) {
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return processedRecords, err
+		}
 		record, err := reader.Read()
 		if err == io.EOF {
 			break
@@ -281,14 +310,19 @@ func (client *Client) finishSendingBets() error {
 
 // receiveWinners consumes the streamed winner sequence, writes each record to
 // output, and verifies the count declared by WINNERS_END.
-func (client *Client) receiveWinners(output io.Writer) (uint32, error) {
+func (client *Client) receiveWinners(output io.Writer) (receivedCount uint32, err error) {
 	writer := csv.NewWriter(output)
-	var receivedCount uint32
+	defer func() {
+		writer.Flush()
+		if flushErr := writer.Error(); flushErr != nil && err == nil {
+			err = fmt.Errorf("flush winners: %w", flushErr)
+		}
+	}()
 
 	for {
-		message, err := protocol.ReceiveMessage(client.conn)
-		if err != nil {
-			return receivedCount, err
+		message, receiveErr := protocol.ReceiveMessage(client.conn)
+		if receiveErr != nil {
+			return receivedCount, receiveErr
 		}
 
 		switch message.Type {
@@ -317,10 +351,6 @@ func (client *Client) receiveWinners(output io.Writer) (uint32, error) {
 					expectedCount,
 				)
 			}
-			writer.Flush()
-			if err := writer.Error(); err != nil {
-				return receivedCount, fmt.Errorf("flush winners: %w", err)
-			}
 			return receivedCount, nil
 
 		case protocol.MessageTypeError:
@@ -335,9 +365,35 @@ func (client *Client) receiveWinners(output io.Writer) (uint32, error) {
 	}
 }
 
-func (client *Client) Run() (err error) {
+func (client *Client) Run(ctx context.Context) (err error) {
 	const action = "process-input-file"
-	defer closeResource("server connection", client.conn, &err)
+	// Cancellation caused by SIGTERM is a successful controlled termination.
+	// Register this defer first so resource-close defers run before it.
+	defer func() {
+		if ctx.Err() != nil {
+			err = nil
+		}
+	}()
+	defer closeResource("server connection", client, &err)
+
+	watcherStop := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-ctx.Done():
+			_ = client.Close()
+		case <-watcherStop:
+		}
+	}()
+	defer func() {
+		close(watcherStop)
+		<-watcherDone
+	}()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	inputFile, err := os.Open(client.config.InputFile)
 	if err != nil {
@@ -355,7 +411,7 @@ func (client *Client) Run() (err error) {
 	if err := client.registerAgency(); err != nil {
 		return err
 	}
-	processedRecords, err := client.sendInput(inputFile)
+	processedRecords, err := client.sendInput(ctx, inputFile)
 	if err != nil {
 		return err
 	}
