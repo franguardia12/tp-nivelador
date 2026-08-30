@@ -2,6 +2,7 @@
 
 import multiprocessing
 import socket
+import time
 from dataclasses import dataclass
 from multiprocessing.connection import Connection, wait
 
@@ -11,9 +12,15 @@ from lottery import Lottery
 from .client_session import ClientSession
 from .lottery_file_lock import LotteryFileLock
 from .quorum import AgencyQuorum
+from .shutdown import (
+    ShutdownRequested,
+    install_sigterm_handler,
+    restore_sigterm_handler,
+)
 
 _AGENCY_NOTIFICATION_SIZE = 4
 _QUORUM_RELEASE = b"\x01"
+_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 3.0
 
 
 @dataclass
@@ -33,12 +40,18 @@ def _serve_client_process(
 ) -> None:
     """Own one client socket and its coordinator connection in a child process."""
 
-    with coordinator_connection, client_socket:
-        ClientSession(
-            lottery,
-            lottery_file_lock,
-            coordinator_connection,
-        ).run(client_socket)
+    previous_sigterm_handler = install_sigterm_handler()
+    try:
+        with coordinator_connection, client_socket:
+            ClientSession(
+                lottery,
+                lottery_file_lock,
+                coordinator_connection,
+            ).run(client_socket)
+    except ShutdownRequested:
+        logger.info("client-process-shutdown", logger.LogResult.success)
+    finally:
+        restore_sigterm_handler(previous_sigterm_handler)
 
 
 class ProcessCoordinator:
@@ -162,9 +175,7 @@ class ProcessCoordinator:
 
         worker = self._client_processes.pop(process_id)
         worker.process.join()
-        if worker.connection is not None:
-            worker.connection.close()
-        worker.process.close()
+        self._close_worker(worker)
 
     def _wait_objects(self, server_socket: socket.socket) -> list[object]:
         """Collect the listener, unread control connections, and sentinels."""
@@ -189,3 +200,54 @@ class ProcessCoordinator:
                 self._read_worker_arrival(worker)
             if worker.process.sentinel in ready_objects:
                 self._reap_worker(process_id)
+
+    @staticmethod
+    def _close_worker(worker: _ClientProcess) -> None:
+        """Release the parent-side objects of a worker that is no longer alive."""
+
+        if worker.connection is not None:
+            worker.connection.close()
+            worker.connection = None
+        worker.process.close()
+
+    def shutdown(self) -> None:
+        """Request orderly worker termination, then enforce a bounded deadline."""
+
+        if not self._client_processes:
+            return
+
+        action = "shutdown-client-processes"
+        logger.info(
+            action,
+            logger.LogResult.in_progress,
+            "processes-amount",
+            len(self._client_processes),
+        )
+        workers = list(self._client_processes.values())
+        for worker in workers:
+            if worker.process.is_alive():
+                worker.process.terminate()
+
+        deadline = time.monotonic() + _WORKER_SHUTDOWN_TIMEOUT_SECONDS
+        for worker in workers:
+            remaining = max(0.0, deadline - time.monotonic())
+            worker.process.join(remaining)
+
+        forced_count = 0
+        for worker in workers:
+            if worker.process.is_alive():
+                forced_count += 1
+                worker.process.kill()
+                worker.process.join()
+            self._close_worker(worker)
+
+        self._client_processes.clear()
+        result = (
+            logger.LogResult.success if forced_count == 0 else logger.LogResult.fail
+        )
+        logger.info(
+            action,
+            result,
+            "forced-processes-amount",
+            forced_count,
+        )
