@@ -1,5 +1,16 @@
 # TP Nivelador: Docker, Comunicaciones y Concurrencia
 
+Franco Guardia - 109374
+
+## Resolución del ejercicio 4
+
+Se modificaron las funciones `send_all` y `recv_all` del cliente y del servidor
+para repetir las operaciones de escritura y lectura hasta transferir la cantidad
+total de bytes esperada. Cada iteración continúa desde el desplazamiento ya
+procesado, por lo que contempla correctamente los casos de _short write_ y _short
+read_ sin reenviar ni sobrescribir datos. Los errores de los sockets se propagan
+dado que podrían ser permanentes.
+
 ## Introducción
 
 El objetivo de este trabajo es tanto repasar conceptos fundamentales de la concurrencia y la comunicación, como introducir a los estudiantes al desarrollo de sistemas distribuídos, en donde el código de las partes que lo componen se encapsulan en _containers_, orquestados en este caso por la herramienta [Docker Compose](https://docs.docker.com/compose/).
