@@ -280,6 +280,35 @@ Cliente                                      Servidor
 Un mensaje fuera de orden produce `ERROR`. La sincronización normal depende del
 intercambio de mensajes y no de esperas temporales prefijadas.
 
+### Finalización graceful
+
+Tanto el cliente como el servidor registran `SIGTERM` en sus respectivos
+entrypoints y lo convierten en un pedido de terminación controlado. De esta manera
+los módulos internos retornan errores o desenrollan la pila en lugar de invocar
+funciones de salida forzada.
+
+En Go se utiliza `signal.NotifyContext`. El contexto cancela inmediatamente los
+reintentos de conexión y una goroutine dedicada cierra la conexión TCP para
+desbloquear cualquier lectura o escritura en curso. La goroutine dispone de un
+canal de finalización que `Run` espera antes de retornar. Un `sync.Once` evita que
+el cierre normal y la cancelación cierren la conexión más de una vez. Los archivos
+de entrada y salida se liberan mediante `defer`; el writer CSV se vacía también si
+la recepción de ganadores es interrumpida.
+
+En Python el handler convierte `SIGTERM` en `ShutdownRequested`. El proceso padre
+sale de `multiprocessing.connection.wait`, cierra el socket de escucha y solicita
+la terminación de todos los workers mediante `Process.terminate`, que en POSIX les
+entrega la misma señal. Cada hijo instala su propio handler, por lo que la señal
+desenrolla sus context managers y libera el socket TCP, la `Connection` de IPC y
+cualquier file lock activo.
+
+El coordinador espera todos los procesos mediante `join` con un plazo global de
+tres segundos. Si un worker no responde dentro de ese período, se aplica `kill` como
+último recurso y luego se lo recolecta; así el tiempo total permanece conocido y
+acotado. En el flujo normal todos los workers responden a `SIGTERM` y esta reserva
+no se utiliza. Finalmente se cierran los objetos `Process` y los extremos de IPC
+retenidos por el padre, tras lo cual se elimina el directorio temporal.
+
 ### Manejo de errores y recursos
 
 La finalización de una lectura o escritura se determina al acumular exactamente la

@@ -2,22 +2,18 @@
 
 Franco Guardia - 109374
 
-## Resolución del ejercicio 7
+## Resolución del ejercicio 8
 
-El servidor mantiene un proceso padre coordinador y atiende cada conexión en un
-proceso hijo independiente. La creación de workers se realiza con
-`multiprocessing`, mientras que la sincronización utiliza mecanismos del sistema
-operativo expuestos por `multiprocessing`: un `Pipe` por worker, espera bloqueante
-con `multiprocessing.connection.wait` y file locks con `flock`. Los procesos
-terminados se unen y eliminan del registro del padre.
+Cliente y servidor capturan `SIGTERM` y lo traducen a su flujo normal de
+finalización. El cliente cancela reintentos, desbloquea las operaciones de red al
+cerrar su conexión y espera la goroutine de cancelación; los archivos de entrada y
+salida se cierran mediante `defer` y el buffer CSV se vacía antes de retornar.
 
-Cuando una agencia envía `END_BETS`, su identificador se registra en un conjunto y
-el worker lo notifica al padre mediante un pipe. Luego queda bloqueado esperando
-la respuesta sobre esa misma conexión hasta que la cantidad de agencias distintas
-alcanza `AGENCY_QUORUM_MIN`; el padre libera entonces todos los workers que
-esperan. El archivo de `Lottery` se protege entre procesos mediante locks
-compartidos para lectura y exclusivos para escritura. Cada conexión recibe
-únicamente los ganadores de su propia agencia.
+En el servidor, la señal interrumpe la espera del proceso padre y activa el cierre
+del listener y del coordinador. Este envía `SIGTERM` a los workers, cuyos handlers
+desenrollan la pila para liberar sockets, conexiones IPC y file locks. El padre
+ejecuta `join` con un plazo global de tres segundos y conserva una terminación
+forzada únicamente como último recurso para mantener el cierre acotado.
 
 ## Introducción
 
