@@ -18,9 +18,6 @@ los ganadores pertenecientes a la agencia que abrió la conexión.
 - Los enteros son sin signo y se codifican en orden de red (big-endian).
 - Las longitudes de strings representan bytes UTF-8, no caracteres.
 - Todos los mensajes poseen un encabezado fijo y un payload de longitud variable.
-- El tamaño máximo de un payload es 16 MiB. Un encabezado que declare una longitud
-  mayor se considera inválido y se rechaza antes de reservar memoria para el
-  payload.
 - `send_all` y `recv_all` se emplean para transferir exactamente la cantidad de
   bytes requerida, contemplando short writes y short reads.
 
@@ -43,10 +40,9 @@ TCP entrega un flujo de bytes y no conserva los límites entre escrituras. Por e
 se eligió un framing con longitud explícita en lugar de depender de una lectura,
 de delimitadores que podrían aparecer en los datos o de mensajes de tamaño fijo.
 Un byte para el tipo permite representar hasta 256 clases de mensaje, suficiente
-para el protocolo actual y sus extensiones previstas. Los cuatro bytes de longitud
-permiten describir payloads variables y lotes futuros; el límite operativo de 16
-MiB no forma parte de la capacidad teórica del campo, sino que evita reservar
-memoria sin una cota ante un encabezado inválido.
+para el protocolo actual. Los cuatro bytes de longitud permiten describir payloads
+variables y lotes futuros mediante un `uint32`. No se impone un límite operativo
+adicional: la única cota del payload surge de su representación en el encabezado.
 
 Las longitudes `uint16` de los strings permiten validar y recorrer cada apuesta
 sin separadores ambiguos, mientras que `uint32` y `uint64` cubren los dominios
@@ -188,10 +184,9 @@ intercambio de mensajes y no de esperas temporales prefijadas.
 La finalización de una lectura o escritura se determina al acumular exactamente la
 cantidad esperada de bytes. Si una operación no avanza pero tampoco informa un
 error, no se considera completa mientras todavía falten bytes y se vuelve a
-intentar según el contrato adoptado para el ejercicio. Los errores informados por
-el socket antes de completar un encabezado o payload se propagan. Cuando la
-conexión todavía es utilizable, el servidor intenta enviar un mensaje `ERROR`;
-luego registra el problema y cierra la sesión.
+intentar. Los errores informados por el socket antes de completar un encabezado o
+payload se propagan. Cuando la conexión todavía es utilizable, el servidor intenta
+enviar un mensaje `ERROR`; luego registra el problema y cierra la sesión.
 
 Los errores se devuelven por el flujo normal de las funciones, sin forzar la salida
 desde los módulos internos. Los archivos y sockets quedan bajo mecanismos de
