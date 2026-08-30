@@ -9,6 +9,7 @@ from lottery import Lottery
 from protocol.bets import decode_bets, encode_bet
 
 from .lottery_file_lock import LotteryFileLock
+from .shutdown import ShutdownRequested
 
 _AGENCY_NOTIFICATION_SIZE = 4
 _QUORUM_RELEASE = b"\x01"
@@ -230,6 +231,8 @@ class ClientSession:
             stored_count = self._receive_bets(client_socket, agency_id)
             self._wait_for_quorum(agency_id)
             winner_count = self._send_winners(client_socket, agency_id)
+        except ShutdownRequested:
+            raise
         except ClientSessionError as error:
             self._try_send_error(client_socket, error)
             logger.error(action, logger.LogResult.fail, "err", error)

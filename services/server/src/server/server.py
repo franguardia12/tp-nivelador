@@ -30,12 +30,15 @@ class Server:
             server_socket.bind((self._server_host, self._server_port))
             server_socket.listen()
 
-            while True:
-                ready_objects = self._process_coordinator.wait(server_socket)
-                if server_socket in ready_objects:
-                    logger.info(action, logger.LogResult.in_progress)
-                    client_socket, _ = server_socket.accept()
-                    logger.info(action, logger.LogResult.success)
-                    self._process_coordinator.start_client(client_socket)
+            try:
+                while True:
+                    ready_objects = self._process_coordinator.wait(server_socket)
+                    if server_socket in ready_objects:
+                        logger.info(action, logger.LogResult.in_progress)
+                        client_socket, _ = server_socket.accept()
+                        logger.info(action, logger.LogResult.success)
+                        self._process_coordinator.start_client(client_socket)
 
-                self._process_coordinator.process_ready(ready_objects)
+                    self._process_coordinator.process_ready(ready_objects)
+            finally:
+                self._process_coordinator.shutdown()

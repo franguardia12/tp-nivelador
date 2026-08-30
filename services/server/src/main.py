@@ -29,6 +29,7 @@ def _load_agency_quorum_min() -> int:
 
 def main():
     logger.init()
+    previous_sigterm_handler = server.install_sigterm_handler()
     try:
         agency_quorum_min = _load_agency_quorum_min()
         with tempfile.TemporaryDirectory(prefix="lottery-") as storage_directory:
@@ -46,9 +47,14 @@ def main():
                 server.LotteryFileLock(lock_path),
                 agency_quorum_min,
             ).run()
+    except server.ShutdownRequested:
+        logger.info("server-shutdown", logger.LogResult.success)
+        return 0
     except Exception as e:
         logger.error("server-run", logger.LogResult.fail, "err", e)
         return 1
+    finally:
+        server.restore_sigterm_handler(previous_sigterm_handler)
     return 0
 
 
