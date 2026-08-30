@@ -1,5 +1,14 @@
 # TP Nivelador: Docker, Comunicaciones y Concurrencia
 
+Franco Guardia - 109374
+
+## Resolución del ejercicio 2
+
+Se publicó el puerto TCP `5678` del contenedor del servidor en el mismo puerto
+del equipo anfitrión. De esta manera, el servidor continúa siendo accesible para
+los clientes dentro de la red de Docker y también permite establecer una conexión
+desde el host mediante `localhost:5678`.
+
 ## Introducción
 
 El objetivo de este trabajo es tanto repasar conceptos fundamentales de la concurrencia y la comunicación, como introducir a los estudiantes al desarrollo de sistemas distribuídos, en donde el código de las partes que lo componen se encapsulan en _containers_, orquestados en este caso por la herramienta [Docker Compose](https://docs.docker.com/compose/).
