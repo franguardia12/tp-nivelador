@@ -1,5 +1,16 @@
 # TP Nivelador: Docker, Comunicaciones y Concurrencia
 
+Franco Guardia - 109374
+
+## Resolución del ejercicio 3
+
+Cada cliente lee su archivo CSV de entrada línea por línea, envía cada apuesta al
+servidor en un mensaje individual y verifica la respuesta antes de escribirla en
+su archivo de salida. Los archivos se configuran mediante `INPUT_FILE` y
+`OUTPUT_FILE`; los directorios `input` y `output` se montan como volúmenes para
+permitir modificar las entradas sin reconstruir las imágenes y conservar las
+salidas en el equipo anfitrión. Cada agencia utiliza archivos propios.
+
 ## Introducción
 
 El objetivo de este trabajo es tanto repasar conceptos fundamentales de la concurrencia y la comunicación, como introducir a los estudiantes al desarrollo de sistemas distribuídos, en donde el código de las partes que lo componen se encapsulan en _containers_, orquestados en este caso por la herramienta [Docker Compose](https://docs.docker.com/compose/).
