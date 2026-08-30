@@ -1,5 +1,15 @@
 # TP Nivelador: Docker, Comunicaciones y Concurrencia
 
+Franco Guardia - 109374
+
+## Resolución del ejercicio 1
+
+Se mantuvo el cliente provisto inicialmente (`client_0`) y se definieron cinco
+clientes adicionales (`client_1` a `client_5`) en `docker-compose.yaml`. Todos se
+construyen a partir del mismo `Dockerfile`, dependen del servidor y utilizan la
+misma dirección y puerto para conectarse. Cada contenedor posee un nombre y un
+`AGENCY_ID` diferentes, lo que permite distinguir sus ejecuciones en los logs.
+
 ## Introducción
 
 El objetivo de este trabajo es tanto repasar conceptos fundamentales de la concurrencia y la comunicación, como introducir a los estudiantes al desarrollo de sistemas distribuídos, en donde el código de las partes que lo componen se encapsulan en _containers_, orquestados en este caso por la herramienta [Docker Compose](https://docs.docker.com/compose/).
