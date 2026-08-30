@@ -136,14 +136,6 @@ func EncodeBet(bet model.Bet) ([]byte, error) {
 
 // DecodeBet deserializes a payload that must contain exactly one complete bet.
 func DecodeBet(payload []byte) (model.Bet, error) {
-	if len(payload) > MaxPayloadSize {
-		return model.Bet{}, fmt.Errorf(
-			"payload length %d exceeds maximum %d",
-			len(payload),
-			MaxPayloadSize,
-		)
-	}
-
 	decoder := betDecoder{data: payload}
 	bet, err := decodeBet(&decoder)
 	if err != nil {
@@ -174,13 +166,6 @@ func EncodeBets(bets []model.Bet) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("encode bet %d: %w", index, err)
 		}
-		if len(payload)+len(encodedBet) > MaxPayloadSize {
-			return nil, fmt.Errorf(
-				"payload length exceeds maximum %d while encoding bet %d",
-				MaxPayloadSize,
-				index,
-			)
-		}
 		payload = append(payload, encodedBet...)
 	}
 	return payload, nil
@@ -189,13 +174,6 @@ func EncodeBets(bets []model.Bet) ([]byte, error) {
 // DecodeBets deserializes exactly the declared number of bets and rejects any
 // truncated records or bytes left after the final record.
 func DecodeBets(payload []byte) ([]model.Bet, error) {
-	if len(payload) > MaxPayloadSize {
-		return nil, fmt.Errorf(
-			"payload length %d exceeds maximum %d",
-			len(payload),
-			MaxPayloadSize,
-		)
-	}
 	if len(payload) < 4 {
 		return nil, fmt.Errorf("incomplete bet count")
 	}

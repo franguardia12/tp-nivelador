@@ -5,7 +5,7 @@ from enum import IntEnum
 import safe_socket
 
 HEADER_SIZE = 5
-MAX_PAYLOAD_SIZE = 16 * 1024 * 1024
+_MAX_ENCODED_PAYLOAD_LENGTH = (1 << 32) - 1
 
 
 class MessageType(IntEnum):
@@ -32,9 +32,9 @@ def _as_message_type(value: MessageType | int) -> MessageType:
 
 
 def _validate_payload_size(payload_size: int) -> None:
-    if payload_size > MAX_PAYLOAD_SIZE:
+    if payload_size > _MAX_ENCODED_PAYLOAD_LENGTH:
         raise ValueError(
-            f"payload length {payload_size} exceeds maximum {MAX_PAYLOAD_SIZE}"
+            f"payload length {payload_size} cannot be represented by uint32"
         )
 
 
@@ -54,7 +54,6 @@ def receive_message(sock: socket.socket) -> Message:
     header = safe_socket.recv_all(sock, HEADER_SIZE)
     message_type = _as_message_type(header[0])
     payload_size = int.from_bytes(header[1:HEADER_SIZE], "big")
-    _validate_payload_size(payload_size)
 
     payload = safe_socket.recv_all(sock, payload_size)
     return Message(message_type, payload)

@@ -6,7 +6,6 @@ once per connection. Decoding adds that session value to the domain Bet.
 
 from lottery import Bet
 
-from .framing import MAX_PAYLOAD_SIZE
 from .primitives import MAX_STRING_SIZE, MAX_UINT32, MAX_UINT64, encode_uint
 
 MINIMUM_ENCODED_BET_SIZE = 18
@@ -92,10 +91,6 @@ def encode_bet(bet: Bet) -> bytes:
 def decode_bet(payload: bytes, agency_id: int) -> Bet:
     """Deserialize a payload that must contain exactly one complete bet."""
 
-    if len(payload) > MAX_PAYLOAD_SIZE:
-        raise ValueError(
-            f"payload length {len(payload)} exceeds maximum {MAX_PAYLOAD_SIZE}"
-        )
     _validate_agency_id(agency_id)
 
     decoder = _BetDecoder(payload)
@@ -116,18 +111,11 @@ def encode_bets(bets: list[Bet]) -> bytes:
         raise ValueError(f"bet count {len(bets)} exceeds uint32")
 
     encoded_bets: list[bytes] = []
-    payload_size = 4
     for index, bet in enumerate(bets):
         try:
             encoded_bet = encode_bet(bet)
         except ValueError as error:
             raise ValueError(f"encode bet {index}: {error}") from error
-        payload_size += len(encoded_bet)
-        if payload_size > MAX_PAYLOAD_SIZE:
-            raise ValueError(
-                f"payload length exceeds maximum {MAX_PAYLOAD_SIZE} "
-                f"while encoding bet {index}"
-            )
         encoded_bets.append(encoded_bet)
 
     return len(bets).to_bytes(4, "big") + b"".join(encoded_bets)
@@ -136,10 +124,6 @@ def encode_bets(bets: list[Bet]) -> bytes:
 def decode_bets(payload: bytes, agency_id: int) -> list[Bet]:
     """Decode exactly the declared bets and reject truncation or trailing bytes."""
 
-    if len(payload) > MAX_PAYLOAD_SIZE:
-        raise ValueError(
-            f"payload length {len(payload)} exceeds maximum {MAX_PAYLOAD_SIZE}"
-        )
     if len(payload) < 4:
         raise ValueError("incomplete bet count")
     _validate_agency_id(agency_id)
