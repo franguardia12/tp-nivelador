@@ -1,12 +1,12 @@
 package client
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/shutdown"
 )
 
 // closeResource closes a resource and preserves an earlier execution error. A
@@ -20,16 +20,17 @@ func closeResource(name string, resource io.Closer, runErr *error) {
 	}
 }
 
-// watchCancellation closes the connection when the context is canceled so a
-// blocking socket operation wakes up. The returned function joins the watcher.
-func (client *Client) watchCancellation(ctx context.Context) func() {
+// watchShutdown closes the connection when SIGTERM closes the notification
+// channel, waking any blocked socket operation. The returned function joins the
+// watcher.
+func (client *Client) watchShutdown(shutdownDone <-chan struct{}) func() {
 	stop := make(chan struct{})
 	done := make(chan struct{})
 
 	go func() {
 		defer close(done)
 		select {
-		case <-ctx.Done():
+		case <-shutdownDone:
 			// The deferred closeResource call observes and reports this stored
 			// result after the blocked socket operation has been released.
 			_ = client.Close()
@@ -44,22 +45,22 @@ func (client *Client) watchCancellation(ctx context.Context) func() {
 }
 
 // Run performs one complete client session and owns all acquired resources.
-func (client *Client) Run(ctx context.Context) (err error) {
+func (client *Client) Run(shutdownDone <-chan struct{}) (err error) {
 	const action = "process-input-file"
 	// Cancellation caused by SIGTERM is a successful controlled termination.
 	// Register this defer first so resource-close defers run before it.
 	defer func() {
-		if ctx.Err() != nil {
+		if shutdown.Requested(shutdownDone) {
 			err = nil
 		}
 	}()
 	defer closeResource("server connection", client, &err)
 
-	stopCancellationWatcher := client.watchCancellation(ctx)
-	defer stopCancellationWatcher()
+	stopShutdownWatcher := client.watchShutdown(shutdownDone)
+	defer stopShutdownWatcher()
 
-	if err := ctx.Err(); err != nil {
-		return err
+	if shutdown.Requested(shutdownDone) {
+		return shutdown.ErrRequested
 	}
 
 	inputFile, err := os.Open(client.config.InputFile)
@@ -78,7 +79,7 @@ func (client *Client) Run(ctx context.Context) (err error) {
 	if err := client.registerAgency(); err != nil {
 		return err
 	}
-	processedRecords, err := client.sendInput(ctx, inputFile)
+	processedRecords, err := client.sendInput(shutdownDone, inputFile)
 	if err != nil {
 		return err
 	}

@@ -287,13 +287,15 @@ entrypoints y lo convierten en un pedido de terminación controlado. De esta man
 los módulos internos retornan errores o desenrollan la pila en lugar de invocar
 funciones de salida forzada.
 
-En Go se utiliza `signal.NotifyContext`. El contexto cancela inmediatamente los
-reintentos de conexión y una goroutine dedicada cierra la conexión TCP para
-desbloquear cualquier lectura o escritura en curso. La goroutine dispone de un
-canal de finalización que `Run` espera antes de retornar. Un `sync.Once` evita que
-el cierre normal y la cancelación cierren la conexión más de una vez. Los archivos
-de entrada y salida se liberan mediante `defer`; el writer CSV se vacía también si
-la recepción de ganadores es interrumpida.
+En Go, `os/signal` entrega `SIGTERM` por un canal y una goroutine lo traduce al
+cierre de un canal de notificación propio. Los reintentos esperan ese canal con
+`select`; cada intento de conexión posee un timeout de un segundo para mantener
+acotada una terminación que ocurra durante `Dial`. Otra goroutine cierra la
+conexión TCP para desbloquear cualquier lectura o escritura en curso. Ambas
+goroutines disponen de canales de finalización que el proceso espera antes de
+retornar. Un `sync.Once` evita que el cierre normal y la señal cierren la conexión
+más de una vez. Los archivos de entrada y salida se liberan mediante `defer`; el
+writer CSV se vacía también si la recepción de ganadores es interrumpida.
 
 En Python el handler convierte `SIGTERM` en `ShutdownRequested`. El proceso padre
 sale de `multiprocessing.connection.wait`, cierra el socket de escucha y solicita

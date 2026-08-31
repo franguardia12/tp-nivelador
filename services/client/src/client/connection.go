@@ -1,19 +1,20 @@
 package client
 
 import (
-	"context"
 	"net"
 	"time"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/shutdown"
 )
 
 const connectionAttemptsMax = 10
 const connectionAttemptDelay = 500 * time.Millisecond
+const connectionAttemptTimeout = time.Second
 
 // connectToServer retries transient startup failures and makes the delay
 // interruptible so SIGTERM does not have to wait for the next attempt.
-func connectToServer(ctx context.Context, host, port string) (net.Conn, error) {
+func connectToServer(shutdownDone <-chan struct{}, host, port string) (net.Conn, error) {
 	const action = "connect-to-server"
 	address := net.JoinHostPort(host, port)
 	var err error
@@ -21,19 +22,32 @@ func connectToServer(ctx context.Context, host, port string) (net.Conn, error) {
 
 	logger.Info(action, logger.InProgress)
 	for attempt := range connectionAttemptsMax {
-		var dialer net.Dialer
-		conn, err = dialer.DialContext(ctx, "tcp", address)
+		if shutdown.Requested(shutdownDone) {
+			return nil, shutdown.ErrRequested
+		}
+
+		conn, err = net.DialTimeout("tcp", address, connectionAttemptTimeout)
+		if shutdown.Requested(shutdownDone) {
+			if conn != nil {
+				if closeErr := conn.Close(); closeErr != nil {
+					logger.Error(
+						"close-resource",
+						logger.Fail,
+						"resource", "server connection",
+						"err", closeErr,
+					)
+				}
+			}
+			return nil, shutdown.ErrRequested
+		}
 		if err == nil {
 			logger.Info(action, logger.Success)
 			return conn, nil
 		}
 
 		logger.Warn(action, logger.Fail, "attempt", attempt)
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
 		if attempt+1 < connectionAttemptsMax {
-			if err := waitForRetry(ctx); err != nil {
+			if err := waitForRetry(shutdownDone); err != nil {
 				return nil, err
 			}
 		}
@@ -43,13 +57,13 @@ func connectToServer(ctx context.Context, host, port string) (net.Conn, error) {
 }
 
 // waitForRetry blocks without busy waiting and remains cancelable.
-func waitForRetry(ctx context.Context) error {
+func waitForRetry(shutdownDone <-chan struct{}) error {
 	retryTimer := time.NewTimer(connectionAttemptDelay)
 	defer retryTimer.Stop()
 
 	select {
-	case <-ctx.Done():
-		return ctx.Err()
+	case <-shutdownDone:
+		return shutdown.ErrRequested
 	case <-retryTimer.C:
 		return nil
 	}

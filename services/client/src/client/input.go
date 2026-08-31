@@ -1,7 +1,6 @@
 package client
 
 import (
-	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/model"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/shutdown"
 )
 
 // logSkippedBet records an invalid input row without interrupting later rows.
@@ -25,7 +25,7 @@ func logSkippedBet(recordIndex int, err error) {
 
 // sendInput reads input incrementally, skips invalid records, and sends groups of
 // at most BatchSize bets. The returned count includes only acknowledged records.
-func (client *Client) sendInput(ctx context.Context, input io.Reader) (int, error) {
+func (client *Client) sendInput(shutdownDone <-chan struct{}, input io.Reader) (int, error) {
 	reader := csv.NewReader(input)
 	reader.FieldsPerRecord = betcsv.FieldCount
 	processedRecords := 0
@@ -45,8 +45,8 @@ func (client *Client) sendInput(ctx context.Context, input io.Reader) (int, erro
 	}
 
 	for {
-		if err := ctx.Err(); err != nil {
-			return processedRecords, err
+		if shutdown.Requested(shutdownDone) {
+			return processedRecords, shutdown.ErrRequested
 		}
 		record, err := reader.Read()
 		if err == io.EOF {

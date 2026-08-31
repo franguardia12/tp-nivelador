@@ -6,7 +6,7 @@ Franco Guardia - 109374
 
 Cliente y servidor capturan `SIGTERM` y lo traducen a su flujo normal de
 finalización. El cliente cancela reintentos, desbloquea las operaciones de red al
-cerrar su conexión y espera la goroutine de cancelación; los archivos de entrada y
+cerrar su conexión y espera las goroutines de cierre; los archivos de entrada y
 salida se cierran mediante `defer` y el buffer CSV se vacía antes de retornar.
 
 En el servidor, la señal interrumpe la espera del proceso padre y activa el cierre

@@ -1,7 +1,6 @@
 package client
 
 import (
-	"context"
 	"net"
 	"sync"
 
@@ -22,8 +21,8 @@ type Client struct {
 }
 
 // NewClient establishes the configured server connection.
-func NewClient(ctx context.Context, config ClientConfig) (*Client, error) {
-	conn, err := connectToServer(ctx, config.ServerHost, config.ServerPort)
+func NewClient(shutdownDone <-chan struct{}, config ClientConfig) (*Client, error) {
+	conn, err := connectToServer(shutdownDone, config.ServerHost, config.ServerPort)
 	if err != nil {
 		logger.Warn("connect-to-server", logger.Fail)
 		return nil, err

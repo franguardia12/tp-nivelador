@@ -1,26 +1,24 @@
 package main
 
 import (
-	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
 	client "github.com/7574-sistemas-distribuidos/tp-nivelador/src/client"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/config"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/shutdown"
 )
 
-func run(ctx context.Context) int {
+func run(shutdownDone <-chan struct{}) int {
 	clientConfig, err := config.Load()
 	if err != nil {
 		logger.Error("load-config", logger.Fail, "err", err)
 		return 1
 	}
 
-	lotteryClient, err := client.NewClient(ctx, clientConfig)
+	lotteryClient, err := client.NewClient(shutdownDone, clientConfig)
 	if err != nil {
-		if ctx.Err() != nil {
+		if shutdown.Requested(shutdownDone) {
 			logger.Info("client-shutdown", logger.Success)
 			return 0
 		}
@@ -28,22 +26,19 @@ func run(ctx context.Context) int {
 		return 1
 	}
 
-	if err := lotteryClient.Run(ctx); err != nil {
+	if err := lotteryClient.Run(shutdownDone); err != nil {
 		logger.Error("client-run", logger.Fail, "err", err)
 		return 1
 	}
-	if ctx.Err() != nil {
+	if shutdown.Requested(shutdownDone) {
 		logger.Info("client-shutdown", logger.Success)
 	}
 	return 0
 }
 
 func main() {
-	ctx, stopSignalNotifications := signal.NotifyContext(
-		context.Background(),
-		syscall.SIGTERM,
-	)
-	exitCode := run(ctx)
-	stopSignalNotifications()
+	shutdownNotifier := shutdown.NewSIGTERMNotifier()
+	exitCode := run(shutdownNotifier.Done())
+	shutdownNotifier.Stop()
 	os.Exit(exitCode)
 }
