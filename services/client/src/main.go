@@ -2,87 +2,23 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	client "github.com/7574-sistemas-distribuidos/tp-nivelador/src/client"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/config"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 )
 
-// loadBatchSize reads and validates the mandatory positive uint32 BATCH_SIZE.
-func loadBatchSize() (uint32, error) {
-	batchSizeValue := os.Getenv("BATCH_SIZE")
-	if batchSizeValue == "" {
-		return 0, errors.New("BATCH_SIZE environment variable is required")
-	}
-
-	batchSize, err := strconv.ParseUint(batchSizeValue, 10, 32)
-	if err != nil {
-		return 0, fmt.Errorf("BATCH_SIZE must be a positive uint32: %w", err)
-	}
-	if batchSize == 0 {
-		return 0, errors.New("BATCH_SIZE must be greater than zero")
-	}
-	return uint32(batchSize), nil
-}
-
-func loadConfig() (client.ClientConfig, error) {
-	agencyIDValue := os.Getenv("AGENCY_ID")
-	if agencyIDValue == "" {
-		return client.ClientConfig{}, errors.New("AGENCY_ID environment variable is required")
-	}
-	agencyID, err := strconv.ParseUint(agencyIDValue, 10, 32)
-	if err != nil {
-		return client.ClientConfig{}, fmt.Errorf("AGENCY_ID must be a uint32: %w", err)
-	}
-
-	serverHost := os.Getenv("SERVER_HOST")
-	if serverHost == "" {
-		return client.ClientConfig{}, errors.New("SERVER_HOST environment variable is required")
-	}
-
-	serverPort := os.Getenv("SERVER_PORT")
-	if serverPort == "" {
-		return client.ClientConfig{}, errors.New("SERVER_PORT environment variable is required")
-	}
-
-	inputFile := os.Getenv("INPUT_FILE")
-	if inputFile == "" {
-		return client.ClientConfig{}, errors.New("INPUT_FILE environment variable is required")
-	}
-
-	outputFile := os.Getenv("OUTPUT_FILE")
-	if outputFile == "" {
-		return client.ClientConfig{}, errors.New("OUTPUT_FILE environment variable is required")
-	}
-
-	batchSize, err := loadBatchSize()
-	if err != nil {
-		return client.ClientConfig{}, err
-	}
-
-	return client.ClientConfig{
-		ServerHost: serverHost,
-		ServerPort: serverPort,
-		AgencyID:   uint32(agencyID),
-		BatchSize:  batchSize,
-		InputFile:  inputFile,
-		OutputFile: outputFile,
-	}, nil
-}
-
 func run(ctx context.Context) int {
-	config, err := loadConfig()
+	clientConfig, err := config.Load()
 	if err != nil {
 		logger.Error("load-config", logger.Fail, "err", err)
 		return 1
 	}
 
-	client, err := client.NewClient(ctx, config)
+	lotteryClient, err := client.NewClient(ctx, clientConfig)
 	if err != nil {
 		if ctx.Err() != nil {
 			logger.Info("client-shutdown", logger.Success)
@@ -92,7 +28,7 @@ func run(ctx context.Context) int {
 		return 1
 	}
 
-	if err := client.Run(ctx); err != nil {
+	if err := lotteryClient.Run(ctx); err != nil {
 		logger.Error("client-run", logger.Fail, "err", err)
 		return 1
 	}
