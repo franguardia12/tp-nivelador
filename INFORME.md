@@ -5,7 +5,7 @@
 El sistema está compuesto por clientes escritos en Go que representan agencias de
 lotería y un servidor escrito en Python que representa la central de Lotería
 Nacional. Los procesos se comunican mediante sockets TCP y un protocolo binario
-propio. No se utilizan bibliotecas de serialización ni formatos como JSON.
+propio.
 
 Cada cliente procesa su archivo de entrada de manera incremental y agrupa las
 apuestas en lotes configurables. El servidor crea un proceso por conexión, persiste
@@ -19,55 +19,17 @@ ganadores pertenecientes a la agencia que abrió la conexión.
 - Los enteros son sin signo y se codifican en orden de red (big-endian).
 - Las longitudes de strings representan bytes UTF-8, no caracteres.
 - Todos los mensajes poseen un encabezado fijo y un payload de longitud variable.
-- `send_all` y `recv_all` se emplean para transferir exactamente la cantidad de
-  bytes requerida, contemplando short writes y short reads.
 
 ### Framing
 
 El encabezado tiene 5 bytes:
 
-| Campo | Tamaño | Descripción |
-|---|---:|---|
-| Tipo | 1 byte | Identificador del mensaje |
-| Longitud | 4 bytes | Cantidad de bytes del payload |
+- 1 byte para el tipo (identificador del mensaje)
+- 4 bytes para la longitud (cantidad de bytes del payload)
 
 La longitud no incluye los 5 bytes del encabezado. El receptor primero obtiene el
 encabezado completo, valida el tipo y la longitud, y luego recibe exactamente el
 payload declarado.
-
-### Justificación de las decisiones de diseño
-
-TCP entrega un flujo de bytes y no conserva los límites entre escrituras. Por eso
-se eligió un framing con longitud explícita en lugar de depender de una lectura,
-de delimitadores que podrían aparecer en los datos o de mensajes de tamaño fijo.
-Un byte para el tipo permite representar hasta 256 clases de mensaje, suficiente
-para el protocolo actual y sus extensiones previstas. Los cuatro bytes de longitud
-permiten describir payloads variables mediante un `uint32`. No se impone un límite
-operativo adicional que reduzca la cantidad configurada mediante `BATCH_SIZE`; la
-única cota del payload es la que surge de su representación en el encabezado.
-
-Las longitudes `uint16` de los strings permiten validar y recorrer cada apuesta
-sin separadores ambiguos, mientras que `uint32` y `uint64` cubren los dominios
-esperados para identificadores, números y documentos. El identificador de agencia
-se envía una sola vez porque pertenece a la sesión y no a cada apuesta. A su vez,
-el contador incluido en `BETS` permite enviar lotes sin cambiar la representación
-de una apuesta ni el framing general.
-
-Cada cliente mantiene una única conexión durante toda la sesión. Los `ACK`
-confirman que el servidor terminó de procesar la operación correspondiente, y
-`END_BETS` marca el cambio de la etapa de carga a la de resultados. Después de
-enviarlo, el cliente realiza una recepción bloqueante: no consulta periódicamente
-ni envía mensajes auxiliares mientras espera el primer ganador. Los ganadores se
-transmiten individualmente y `WINNERS_END` delimita la secuencia, lo que permite
-procesarlos y escribirlos de manera incremental sin acumular la lista completa en
-memoria.
-
-El almacenamiento temporal del servidor proporciona la ruta de archivo requerida
-por `Lottery`. Los procesos heredan instancias configuradas con esa misma ruta, por
-lo que las apuestas persisten en un único almacenamiento externo a sus memorias y
-permanecen disponibles entre sesiones sucesivas. El directorio se elimina
-automáticamente cuando termina el servidor; no se utiliza como mecanismo de
-comunicación entre cliente y servidor.
 
 ### Tipos de mensajes
 
@@ -108,8 +70,7 @@ Contiene únicamente el identificador de agencia como `uint32`.
 Comienza con la cantidad de apuestas como `uint32`, seguida por esa cantidad de
 apuestas serializadas. La cantidad máxima de registros agrupados por el cliente se
 configura mediante `BATCH_SIZE`; el último mensaje puede contener una cantidad
-menor si el archivo no completa otro lote. `BATCH_SIZE` expresa una cantidad de
-registros y constituye el único límite configurable para formar los lotes.
+menor si el archivo no completa otro lote.
 
 No se admite una cantidad igual a cero. El servidor decodifica y valida todo el
 payload antes de intentar almacenarlo.
@@ -173,14 +134,11 @@ sobre el almacenamiento del sistema operativo.
 
 ### Protección de Lottery
 
-El `threading.Lock` no es válido entre procesos porque cada hijo recibiría una
-copia independiente. Por eso los accesos al almacenamiento de `Lottery` se
-coordinan mediante `flock` sobre un archivo de lock asociado. Cada llamada a
-`store_bets` mantiene un lock exclusivo hasta finalizar. La iteración de
-`load_bets` mantiene un lock compartido durante todo el recorrido: varios procesos
-pueden leer ganadores simultáneamente, pero un escritor no puede modificar el CSV
-mientras está siendo interpretado. Las apuestas continúan procesándose de manera
-incremental y no se carga el archivo completo en memoria.
+Los accesos al almacenamiento de `Lottery` se coordinan mediante `flock` sobre un 
+archivo de lock asociado. Cada llamada a `store_bets` mantiene un lock exclusivo hasta finalizar. La iteración de `load_bets` mantiene un lock compartido durante todo el 
+recorrido: varios procesos pueden leer ganadores simultáneamente, pero un escritor no 
+puede modificar el CSV mientras está siendo interpretado. Las apuestas continúan 
+procesándose de manera incremental y no se carga el archivo completo en memoria.
 
 ### Quorum de agencias
 
@@ -198,11 +156,9 @@ padre, no necesita memoria compartida ni un lock adicional. El padre consume cad
 notificación, registra el identificador una sola vez y, al alcanzar el mínimo,
 envía un token de un byte a todos los workers que esperan.
 
-Se utilizan `send_bytes` y `recv_bytes` en lugar de `send` y `recv`, por lo que no
-se serializan objetos Python mediante pickle. `Connection` conserva los límites
-de cada mensaje y el receptor valida que la notificación mida cuatro bytes y que
-el token sea el acordado. Tanto `recv_bytes` como
-`multiprocessing.connection.wait` son bloqueantes: no hay busy wait ni períodos
+`Connection` conserva los límites de cada mensaje y el receptor valida que la 
+notificación mida cuatro bytes y que el token sea el acordado. Tanto `recv_bytes` 
+como `multiprocessing.connection.wait` son bloqueantes: no hay busy wait ni períodos
 prefijados. El quorum funciona como un latch de una sola dirección, por lo que los
 workers que lleguen después de su apertura también se liberan inmediatamente.
 
@@ -316,10 +272,9 @@ retenidos por el padre, tras lo cual se elimina el directorio temporal.
 La finalización de una lectura o escritura se determina al acumular exactamente la
 cantidad esperada de bytes. Si una operación no avanza pero tampoco informa un
 error, no se considera completa mientras todavía falten bytes y se vuelve a
-intentar. Los errores informados por
-el socket antes de completar un encabezado o payload se propagan. Cuando la
-conexión todavía es utilizable, el servidor intenta enviar un mensaje `ERROR`;
-luego registra el problema y cierra la sesión.
+intentar. Los errores informados por el socket antes de completar un encabezado 
+o payload se propagan. Cuando la conexión todavía es utilizable, el servidor intenta 
+enviar un mensaje `ERROR`; luego registra el problema y cierra la sesión.
 
 Los errores se devuelven por el flujo normal de las funciones, sin forzar la salida
 desde los módulos internos. Los archivos y sockets quedan bajo mecanismos de
