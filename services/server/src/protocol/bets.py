@@ -91,38 +91,6 @@ def encode_bet(bet: Bet) -> bytes:
     )
 
 
-def decode_bet(payload: bytes, agency_id: int) -> Bet:
-    """Deserialize a payload that must contain exactly one complete bet."""
-    _validate_agency_id(agency_id)
-
-    decoder = _BetDecoder(payload)
-    bet = _decode_bet(decoder, agency_id)
-    if decoder.offset != len(payload):
-        raise ValueError(
-            f"bet payload has {len(payload) - decoder.offset} trailing bytes"
-        )
-    return bet
-
-
-def encode_bets(bets: list[Bet]) -> bytes:
-    """Serialize a non-empty list as a uint32 count followed by each bet."""
-
-    if not bets:
-        raise ValueError("bets payload cannot be empty")
-    if len(bets) > MAX_UINT32:
-        raise ValueError(f"bet count {len(bets)} exceeds uint32")
-
-    encoded_bets: list[bytes] = []
-    for index, bet in enumerate(bets):
-        try:
-            encoded_bet = encode_bet(bet)
-        except ValueError as error:
-            raise ValueError(f"encode bet {index}: {error}") from error
-        encoded_bets.append(encoded_bet)
-
-    return len(bets).to_bytes(BETS_COUNT_SIZE, "big") + b"".join(encoded_bets)
-
-
 def decode_bets(payload: bytes, agency_id: int) -> list[Bet]:
     """Decode exactly the declared bets and reject truncation or trailing bytes."""
     if len(payload) < BETS_COUNT_SIZE:
