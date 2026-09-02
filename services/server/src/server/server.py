@@ -8,21 +8,11 @@ from .process_coordinator import ProcessCoordinator
 
 
 class Server:
-    def __init__(
-        self,
-        server_host: str,
-        server_port: int,
-        lottery: Lottery,
-        lottery_file_lock: LotteryFileLock,
-        agency_quorum_min: int,
-    ) -> None:
+    def __init__(self, server_host: str, server_port: int, lottery: Lottery, 
+                 lottery_file_lock: LotteryFileLock, agency_quorum_min: int) -> None:
         self._server_host = server_host
         self._server_port = server_port
-        self._process_coordinator = ProcessCoordinator(
-            lottery,
-            lottery_file_lock,
-            agency_quorum_min,
-        )
+        self._process_coordinator = ProcessCoordinator(lottery, lottery_file_lock, agency_quorum_min)
 
     def run(self) -> None:
         action = "accept-connection"

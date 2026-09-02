@@ -13,20 +13,13 @@ from .errors import ClientSessionError, receive_message, unexpected_message
 class BetReceiver:
     """Receive, validate and persist an agency's complete bet stream."""
 
-    def __init__(
-        self,
-        lottery: Lottery,
-        lottery_file_lock: LotteryFileLock,
-    ) -> None:
+    def __init__(self, lottery: Lottery, lottery_file_lock: LotteryFileLock) -> None:
         self._lottery = lottery
         self._lottery_file_lock = lottery_file_lock
 
     @staticmethod
-    def _send_ack(
-        client_socket: socket.socket,
-        acknowledged_type: protocol.MessageType,
-        processed_count: int,
-    ) -> None:
+    def _send_ack(client_socket: socket.socket, acknowledged_type: protocol.MessageType, 
+                  processed_count: int) -> None:
         """Confirm a request only after its processing has completed."""
 
         payload = protocol.encode_ack(
@@ -47,11 +40,8 @@ class BetReceiver:
         try:
             agency_id = protocol.decode_agency(message.payload)
         except ValueError as error:
-            raise ClientSessionError(
-                failed_type=message.type,
-                code=protocol.ErrorCode.INVALID_DATA,
-                detail=str(error),
-            ) from error
+            raise ClientSessionError(failed_type=message.type, code=protocol.ErrorCode.INVALID_DATA, 
+                                     detail=str(error)) from error
 
         self._send_ack(client_socket, protocol.MessageType.AGENCY, 0)
         return agency_id
@@ -64,28 +54,20 @@ class BetReceiver:
             message = receive_message(client_socket)
             if message.type == protocol.MessageType.END_BETS:
                 if message.payload:
-                    raise ClientSessionError(
-                        failed_type=message.type,
-                        code=protocol.ErrorCode.MALFORMED_MESSAGE,
-                        detail="END_BETS must have an empty payload",
-                    )
+                    raise ClientSessionError(failed_type=message.type, 
+                                             code=protocol.ErrorCode.MALFORMED_MESSAGE, 
+                                             detail="END_BETS must have an empty payload")
                 return stored_count
 
             if message.type != protocol.MessageType.BETS:
-                raise unexpected_message(
-                    message,
-                    f"{protocol.MessageType.BETS.name} or "
-                    f"{protocol.MessageType.END_BETS.name}",
-                )
+                raise unexpected_message(message, f"{protocol.MessageType.BETS.name} or " 
+                                         f"{protocol.MessageType.END_BETS.name}")
 
             try:
                 bets = decode_bets(message.payload, agency_id)
             except ValueError as error:
-                raise ClientSessionError(
-                    failed_type=message.type,
-                    code=protocol.ErrorCode.INVALID_DATA,
-                    detail=str(error),
-                ) from error
+                raise ClientSessionError(failed_type=message.type, code=protocol.ErrorCode.INVALID_DATA, 
+                                         detail=str(error)) from error
 
             lock_file = self._lottery_file_lock.acquire_write()
             try:

@@ -15,12 +15,7 @@ from .quorum_messages import receive_arrival, send_release
 class ProcessCoordinator:
     """Synchronize completed agencies while delegating worker lifecycle."""
 
-    def __init__(
-        self,
-        lottery: Lottery,
-        lottery_file_lock: LotteryFileLock,
-        agency_quorum_min: int,
-    ) -> None:
+    def __init__(self, lottery: Lottery, lottery_file_lock: LotteryFileLock, agency_quorum_min: int) -> None:
         self._agency_rounds = AgencyRounds(agency_quorum_min)
         self._workers = ClientWorkerRegistry(lottery, lottery_file_lock)
 
@@ -45,14 +40,8 @@ class ProcessCoordinator:
     def _release_round(self, round_to_start: AgencyRound) -> None:
         """Release exactly the workers selected for one complete round."""
 
-        logger.info(
-            "agency-round-start",
-            logger.LogResult.success,
-            "round-id",
-            round_to_start.number,
-            "agencies-amount",
-            len(round_to_start.agency_ids),
-        )
+        logger.info("agency-round-start", logger.LogResult.success, "round-id", round_to_start.number, 
+                    "agencies-amount", len(round_to_start.agency_ids))
         for process_id in round_to_start.process_ids:
             worker = self._workers.get(process_id)
             if worker is not None:
@@ -72,25 +61,14 @@ class ProcessCoordinator:
         try:
             agency_id = receive_arrival(worker.connection)
         except (EOFError, OSError, ValueError) as error:
-            logger.error(
-                "agency-quorum-arrival",
-                logger.LogResult.fail,
-                "err",
-                error,
-            )
+            logger.error("agency-quorum-arrival", logger.LogResult.fail, "err", error)
             worker.close_connection()
             return
 
         worker.arrived = True
         waiting_count = self._agency_rounds.register(worker.process.pid, agency_id)
-        logger.info(
-            "agency-quorum-arrival",
-            logger.LogResult.success,
-            "agency-id",
-            agency_id,
-            "waiting-agencies-amount",
-            waiting_count,
-        )
+        logger.info("agency-quorum-arrival", logger.LogResult.success, "agency-id", agency_id, 
+                    "waiting-agencies-amount", waiting_count)
         self._start_ready_rounds()
 
     def _finish_worker(self, process_id: int) -> None:
@@ -99,12 +77,7 @@ class ProcessCoordinator:
         completed_round = self._agency_rounds.remove_process(process_id)
         self._workers.reap(process_id)
         if completed_round is not None:
-            logger.info(
-                "agency-round-finish",
-                logger.LogResult.success,
-                "round-id",
-                completed_round,
-            )
+            logger.info("agency-round-finish", logger.LogResult.success, "round-id", completed_round)
 
     def wait(self, server_socket: socket.socket) -> list[object]:
         """Block until the listener or one managed worker object is ready."""

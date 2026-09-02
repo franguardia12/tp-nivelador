@@ -18,12 +18,8 @@ from .winner_sender import WinnerSender
 class ClientSession:
     """Coordinate the input, quorum and output phases of one connection."""
 
-    def __init__(
-        self,
-        lottery: Lottery,
-        lottery_file_lock: LotteryFileLock,
-        coordinator_connection: Connection,
-    ) -> None:
+    def __init__(self, lottery: Lottery, lottery_file_lock: LotteryFileLock, 
+                 coordinator_connection: Connection) -> None:
         self._bet_receiver = BetReceiver(lottery, lottery_file_lock)
         self._winner_sender = WinnerSender(lottery, lottery_file_lock)
         self._coordinator_connection = coordinator_connection
@@ -32,19 +28,9 @@ class ClientSession:
         """Notify the parent and block until assigned to a complete round."""
 
         action = "wait-agency-quorum"
-        logger.info(
-            action,
-            logger.LogResult.in_progress,
-            "agency-id",
-            agency_id,
-        )
+        logger.info(action, logger.LogResult.in_progress, "agency-id", agency_id)
         notify_arrival_and_wait(self._coordinator_connection, agency_id)
-        logger.info(
-            action,
-            logger.LogResult.success,
-            "agency-id",
-            agency_id,
-        )
+        logger.info(action, logger.LogResult.success, "agency-id", agency_id)
 
     def run(self, client_socket: socket.socket) -> None:
         """Run one client session and report protocol or processing failures."""
@@ -62,24 +48,10 @@ class ClientSession:
             logger.error(action, logger.LogResult.fail, "err", error)
             return
         except Exception as error:
-            try_send_error(
-                client_socket,
-                ClientSessionError(
-                    failed_type=0,
-                    code=protocol.ErrorCode.INTERNAL,
-                    detail="internal server error",
-                ),
-            )
+            try_send_error(client_socket, ClientSessionError(failed_type=0, code=protocol.ErrorCode.INTERNAL, 
+                                                             detail="internal server error"))
             logger.error(action, logger.LogResult.fail, "err", error)
             return
 
-        logger.info(
-            action,
-            logger.LogResult.success,
-            "agency-id",
-            agency_id,
-            "bets-amount",
-            stored_count,
-            "winners-amount",
-            winner_count,
-        )
+        logger.info(action, logger.LogResult.success, "agency-id", agency_id, "bets-amount", stored_count, 
+                    "winners-amount", winner_count)
