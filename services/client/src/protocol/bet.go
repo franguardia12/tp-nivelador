@@ -8,7 +8,7 @@ import (
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/model"
 )
 
-const maxStringSize = 1<<16 - 1
+const maxStringSize = 65535
 
 type betDecoder struct {
 	data   []byte
