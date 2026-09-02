@@ -272,12 +272,10 @@ entrega la misma señal. Cada hijo instala su propio handler, por lo que la señ
 desenrolla sus context managers y libera el socket TCP, la `Connection` de IPC y
 cualquier file lock activo.
 
-El coordinador espera todos los procesos mediante `join` con un plazo global de
-tres segundos. Si un worker no responde dentro de ese período, se aplica `kill` como
-último recurso y luego se lo recolecta; así el tiempo total permanece conocido y
-acotado. En el flujo normal todos los workers responden a `SIGTERM` y esta reserva
-no se utiliza. Finalmente se cierran los objetos `Process` y los extremos de IPC
-retenidos por el padre, tras lo cual se elimina el directorio temporal.
+El coordinador propaga `SIGTERM` a todos los workers antes de comenzar a esperarlos,
+por lo que sus limpiezas avanzan concurrentemente. Luego ejecuta `join` sobre cada
+uno y cierra los objetos `Process` y los extremos de IPC retenidos por el padre.
+Finalmente se elimina el directorio temporal.
 
 ### Manejo de errores y recursos
 

@@ -12,8 +12,7 @@ salida se cierran mediante `defer` y el buffer CSV se vacía antes de retornar.
 En el servidor, la señal interrumpe la espera del proceso padre y activa el cierre
 del listener y del coordinador. Este envía `SIGTERM` a los workers, cuyos handlers
 desenrollan la pila para liberar sockets, conexiones IPC y file locks. El padre
-ejecuta `join` con un plazo global de tres segundos y conserva una terminación
-forzada únicamente como último recurso para mantener el cierre acotado.
+envía la señal a todos antes de esperarlos y luego ejecuta `join`.
 
 ## Introducción
 

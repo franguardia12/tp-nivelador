@@ -2,7 +2,6 @@
 
 import multiprocessing
 import socket
-import time
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 
@@ -16,9 +15,6 @@ from .shutdown import (
     install_sigterm_handler,
     restore_sigterm_handler,
 )
-
-_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 3.0
-
 
 @dataclass
 class ClientWorker:
@@ -134,7 +130,7 @@ class ClientWorkerRegistry:
         worker.close()
 
     def shutdown(self) -> None:
-        """Request orderly worker termination, then enforce a bounded deadline."""
+        """Request SIGTERM cleanup and join every managed worker."""
 
         if not self._workers:
             return
@@ -151,26 +147,9 @@ class ClientWorkerRegistry:
             if worker.process.is_alive():
                 worker.process.terminate()
 
-        deadline = time.monotonic() + _WORKER_SHUTDOWN_TIMEOUT_SECONDS
         for worker in workers:
-            remaining = max(0.0, deadline - time.monotonic())
-            worker.process.join(remaining)
-
-        forced_count = 0
-        for worker in workers:
-            if worker.process.is_alive():
-                forced_count += 1
-                worker.process.kill()
-                worker.process.join()
+            worker.process.join()
             worker.close()
 
         self._workers.clear()
-        result = (
-            logger.LogResult.success if forced_count == 0 else logger.LogResult.fail
-        )
-        logger.info(
-            action,
-            result,
-            "forced-processes-amount",
-            forced_count,
-        )
+        logger.info(action, logger.LogResult.success)
