@@ -8,7 +8,7 @@ from lottery import Lottery
 
 from .client_workers import ClientWorker, ClientWorkerRegistry
 from .lottery_file_lock import LotteryFileLock
-from .quorum import AgencyQuorum
+from .quorum import AgencyRound, AgencyRounds
 from .quorum_messages import receive_arrival, send_release
 
 
@@ -21,7 +21,7 @@ class ProcessCoordinator:
         lottery_file_lock: LotteryFileLock,
         agency_quorum_min: int,
     ) -> None:
-        self._agency_quorum = AgencyQuorum(agency_quorum_min)
+        self._agency_rounds = AgencyRounds(agency_quorum_min)
         self._workers = ClientWorkerRegistry(lottery, lottery_file_lock)
 
     def start_client(self, client_socket: socket.socket) -> None:
@@ -42,14 +42,27 @@ class ProcessCoordinator:
         finally:
             worker.close_connection()
 
-    def _release_waiting_workers(self) -> None:
-        """Release every arrived worker after the one-way quorum latch opens."""
+    def _release_round(self, round_to_start: AgencyRound) -> None:
+        """Release exactly the workers selected for one complete round."""
 
-        if not self._agency_quorum.is_open:
-            return
-        for _, worker in self._workers.snapshot():
-            if worker.arrived:
+        logger.info(
+            "agency-round-start",
+            logger.LogResult.success,
+            "round-id",
+            round_to_start.number,
+            "agencies-amount",
+            len(round_to_start.agency_ids),
+        )
+        for process_id in round_to_start.process_ids:
+            worker = self._workers.get(process_id)
+            if worker is not None:
                 self._release_worker(worker)
+
+    def _start_ready_rounds(self) -> None:
+        """Open every complete round while leaving an incomplete remainder queued."""
+
+        for round_to_start in self._agency_rounds.start_ready():
+            self._release_round(round_to_start)
 
     def _read_worker_arrival(self, worker: ClientWorker) -> None:
         """Receive and register one complete agency notification."""
@@ -69,16 +82,29 @@ class ProcessCoordinator:
             return
 
         worker.arrived = True
-        completed_count = self._agency_quorum.register(agency_id)
+        waiting_count = self._agency_rounds.register(worker.process.pid, agency_id)
         logger.info(
             "agency-quorum-arrival",
             logger.LogResult.success,
             "agency-id",
             agency_id,
-            "agencies-amount",
-            completed_count,
+            "waiting-agencies-amount",
+            waiting_count,
         )
-        self._release_waiting_workers()
+        self._start_ready_rounds()
+
+    def _finish_worker(self, process_id: int) -> None:
+        """Reap one worker and report when its own round has finished."""
+
+        completed_round = self._agency_rounds.remove_process(process_id)
+        self._workers.reap(process_id)
+        if completed_round is not None:
+            logger.info(
+                "agency-round-finish",
+                logger.LogResult.success,
+                "round-id",
+                completed_round,
+            )
 
     def wait(self, server_socket: socket.socket) -> list[object]:
         """Block until the listener or one managed worker object is ready."""
@@ -92,7 +118,7 @@ class ProcessCoordinator:
             if worker.connection in ready_objects and not worker.arrived:
                 self._read_worker_arrival(worker)
             if worker.process.sentinel in ready_objects:
-                self._workers.reap(process_id)
+                self._finish_worker(process_id)
 
     def shutdown(self) -> None:
         """Release all worker resources within the configured grace period."""

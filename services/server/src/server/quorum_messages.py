@@ -25,6 +25,6 @@ def receive_arrival(connection: Connection) -> int:
 
 
 def send_release(connection: Connection) -> None:
-    """Release a worker after the quorum latch has opened."""
+    """Release a worker selected for a complete agency round."""
 
     connection.send_bytes(_QUORUM_RELEASE)

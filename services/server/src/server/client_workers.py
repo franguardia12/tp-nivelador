@@ -111,6 +111,11 @@ class ClientWorkerRegistry:
 
         return list(self._workers.items())
 
+    def get(self, process_id: int) -> ClientWorker | None:
+        """Return one managed worker while it remains registered."""
+
+        return self._workers.get(process_id)
+
     def wait_objects(self, server_socket: socket.socket) -> list[object]:
         """Collect the listener, unread control connections and sentinels."""
 

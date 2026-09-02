@@ -29,7 +29,7 @@ class ClientSession:
         self._coordinator_connection = coordinator_connection
 
     def _wait_for_quorum(self, agency_id: int) -> None:
-        """Notify the parent and block until the quorum latch opens."""
+        """Notify the parent and block until assigned to a complete round."""
 
         action = "wait-agency-quorum"
         logger.info(

@@ -143,24 +143,36 @@ procesándose de manera incremental y no se carga el archivo completo en memoria
 ### Quorum de agencias
 
 El mensaje `END_BETS` actúa como notificación de que una agencia terminó de cargar
-sus apuestas. El servidor mantiene un conjunto de identificadores finalizados, por
-lo que conexiones repetidas de una misma agencia no incrementan el quorum. El
-mínimo se obtiene de la variable obligatoria `AGENCY_QUORUM_MIN`, que debe ser un
-entero positivo.
+sus apuestas. El mínimo se obtiene de la variable obligatoria
+`AGENCY_QUORUM_MIN`, que debe ser un entero positivo. El coordinador agrupa las
+notificaciones en rondas sucesivas de exactamente esa cantidad de agencias
+distintas; dos conexiones con el mismo identificador no ocupan dos lugares dentro
+de una misma ronda.
 
 Cada worker posee un `multiprocessing.Pipe` dúplex y conserva uno de sus extremos;
 el otro pertenece al padre. Después de recibir `END_BETS`, el hijo envía el
 `agency_id` como cuatro bytes mediante `send_bytes` y queda bloqueado en
 `recv_bytes`. Como el conjunto de agencias finalizadas pertenece solamente al
 padre, no necesita memoria compartida ni un lock adicional. El padre consume cada
-notificación, registra el identificador una sola vez y, al alcanzar el mínimo,
-envía un token de un byte a todos los workers que esperan.
+notificación y la deja en la cola de la próxima ronda. Cada vez que se alcanza el
+mínimo, selecciona exactamente esos workers y les envía un token de un byte. Las
+agencias restantes comienzan a conformar otra ronda.
 
 `Connection` conserva los límites de cada mensaje y el receptor valida que la 
 notificación mida cuatro bytes y que el token sea el acordado. Tanto `recv_bytes` 
 como `multiprocessing.connection.wait` son bloqueantes: no hay busy wait ni períodos
-prefijados. El quorum funciona como un latch de una sola dirección, por lo que los
-workers que lleguen después de su apertura también se liberan inmediatamente.
+prefijados. Una nueva ronda completa puede liberarse aunque otras todavía estén
+procesando ganadores, maximizando el paralelismo entre procesos; solamente queda
+bloqueado el grupo incompleto que aún no alcanza el quorum. El padre asocia cada
+PID con su ronda y observa los sentinels para registrar su finalización y recolectar
+todos sus procesos de manera independiente. Los locks compartidos permiten que
+varias rondas lean ganadores concurrentemente, mientras que el lock exclusivo
+continúa impidiendo lecturas durante una escritura.
+
+Si quedan menos agencias que el mínimo, sus workers permanecen bloqueados sin
+consumir CPU hasta que lleguen las notificaciones faltantes. El quorum no se
+relaja mediante un timeout; si nunca se completa, solamente una terminación del
+sistema mediante `SIGTERM` interrumpe esa espera y libera sus recursos.
 
 El sorteo se calcula por sesión y los resultados se filtran por `agency_id`. No se
 realiza un broadcast global de ganadores.
