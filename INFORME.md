@@ -269,13 +269,14 @@ En Python el handler convierte `SIGTERM` en `ShutdownRequested`. El proceso padr
 sale de `multiprocessing.connection.wait`, cierra el socket de escucha y solicita
 la terminación de todos los workers mediante `Process.terminate`, que en POSIX les
 entrega la misma señal. Cada hijo instala su propio handler, por lo que la señal
-desenrolla sus context managers y libera el socket TCP, la `Connection` de IPC y
-cualquier file lock activo.
+desenrolla la pila; los context managers y bloques `finally` liberan el socket TCP,
+la `Connection` de IPC y cualquier file lock activo.
 
 El coordinador propaga `SIGTERM` a todos los workers antes de comenzar a esperarlos,
 por lo que sus limpiezas avanzan concurrentemente. Luego ejecuta `join` sobre cada
 uno y cierra los objetos `Process` y los extremos de IPC retenidos por el padre.
-Finalmente se elimina el directorio temporal.
+Finalmente se eliminan los archivos de almacenamiento y, si el servidor tuvo que
+crear su directorio interno, también lo elimina.
 
 ### Manejo de errores y recursos
 

@@ -1,6 +1,5 @@
 """Binary codecs for protocol control-message payloads."""
 
-from dataclasses import dataclass
 from enum import IntEnum
 
 from .framing import MessageType
@@ -9,12 +8,12 @@ from .primitives import MAX_STRING_SIZE, MAX_UINT32, encode_uint
 AGENCY_PAYLOAD_SIZE = 4
 
 
-@dataclass(frozen=True)
 class Ack:
     """A request acknowledgement and its processed-record count."""
 
-    acknowledged_type: MessageType
-    processed_count: int
+    def __init__(self, acknowledged_type: MessageType, processed_count: int) -> None:
+        self.acknowledged_type = acknowledged_type
+        self.processed_count = processed_count
 
 
 class ErrorCode(IntEnum):
@@ -26,23 +25,20 @@ class ErrorCode(IntEnum):
     INTERNAL = 4
 
 
-@dataclass(frozen=True)
 class ErrorPayload:
     """The request, category, and human-readable detail of a protocol error."""
 
-    failed_type: int
-    code: ErrorCode
-    detail: str
+    def __init__(self, failed_type: int, code: ErrorCode, detail: str) -> None:
+        self.failed_type = failed_type
+        self.code = code
+        self.detail = detail
 
 
 def decode_agency(payload: bytes) -> int:
     """Deserialize a payload containing exactly one agency identifier."""
 
     if len(payload) != AGENCY_PAYLOAD_SIZE:
-        raise ValueError(
-            f"agency payload length is {len(payload)}, "
-            f"expected {AGENCY_PAYLOAD_SIZE}"
-        )
+        raise ValueError(f"agency payload length is {len(payload)}, "f"expected {AGENCY_PAYLOAD_SIZE}")
     return int.from_bytes(payload, "big")
 
 
@@ -108,11 +104,5 @@ def encode_error(protocol_error: ErrorPayload) -> bytes:
             f"error detail length {len(detail)} exceeds maximum {MAX_STRING_SIZE}"
         )
 
-    return b"".join(
-        [
-            bytes([failed_type]),
-            int(code).to_bytes(2, "big"),
-            len(detail).to_bytes(2, "big"),
-            detail,
-        ]
-    )
+    return b"".join([bytes([failed_type]), int(code).to_bytes(2, "big"), len(detail).to_bytes(2, "big"), 
+                     detail])

@@ -2,7 +2,6 @@
 
 import multiprocessing
 import socket
-from dataclasses import dataclass
 from multiprocessing.connection import Connection
 
 import logger
@@ -10,19 +9,17 @@ from lottery import Lottery
 
 from .lottery_file_lock import LotteryFileLock
 from .session.client_session import ClientSession
-from .shutdown import (
-    ShutdownRequested,
-    install_sigterm_handler,
-    restore_sigterm_handler,
-)
+from .shutdown import ShutdownRequested, install_sigterm_handler, restore_sigterm_handler
 
-@dataclass
+
 class ClientWorker:
     """Parent-owned process and control connection for one client worker."""
 
-    process: multiprocessing.Process
-    connection: Connection | None
-    arrived: bool = False
+    def __init__(self, process: multiprocessing.Process, connection: Connection | None, arrived: bool = False
+                 ) -> None:
+        self.process = process
+        self.connection = connection
+        self.arrived = arrived
 
     def close_connection(self) -> None:
         """Close the parent Pipe endpoint once."""
@@ -38,22 +35,14 @@ class ClientWorker:
         self.process.close()
 
 
-def _serve_client_process(
-    client_socket: socket.socket,
-    lottery: Lottery,
-    lottery_file_lock: LotteryFileLock,
-    coordinator_connection: Connection,
-) -> None:
+def _serve_client_process(client_socket: socket.socket, lottery: Lottery, lottery_file_lock: LotteryFileLock, 
+                          coordinator_connection: Connection) -> None:
     """Own one client socket and its coordinator connection in a child process."""
 
     previous_sigterm_handler = install_sigterm_handler()
     try:
         with coordinator_connection, client_socket:
-            ClientSession(
-                lottery,
-                lottery_file_lock,
-                coordinator_connection,
-            ).run(client_socket)
+            ClientSession(lottery, lottery_file_lock, coordinator_connection).run(client_socket)
     except ShutdownRequested:
         logger.info("client-process-shutdown", logger.LogResult.success)
     finally:
@@ -63,11 +52,7 @@ def _serve_client_process(
 class ClientWorkerRegistry:
     """Own all worker processes and their parent-side operating-system resources."""
 
-    def __init__(
-        self,
-        lottery: Lottery,
-        lottery_file_lock: LotteryFileLock,
-    ) -> None:
+    def __init__(self, lottery: Lottery, lottery_file_lock: LotteryFileLock) -> None:
         self._lottery = lottery
         self._lottery_file_lock = lottery_file_lock
         # Spawn transfers only explicitly supplied resources and avoids
@@ -79,17 +64,11 @@ class ClientWorkerRegistry:
         """Transfer an accepted socket and one Pipe endpoint to a new worker."""
 
         parent_connection, child_connection = self._process_context.Pipe(duplex=True)
-        process = self._process_context.Process(
-            target=_serve_client_process,
-            args=(
-                client_socket,
-                self._lottery,
-                self._lottery_file_lock,
-                child_connection,
-            ),
-            name=f"client-{client_socket.fileno()}",
-            daemon=False,
-        )
+        process = self._process_context.Process(target=_serve_client_process, args=(client_socket, 
+                                                                                    self._lottery,
+                                                                                    self._lottery_file_lock,
+                                                                                    child_connection), 
+                                                name=f"client-{client_socket.fileno()}", daemon=False)
         try:
             process.start()
         except Exception:
@@ -136,12 +115,7 @@ class ClientWorkerRegistry:
             return
 
         action = "shutdown-client-processes"
-        logger.info(
-            action,
-            logger.LogResult.in_progress,
-            "processes-amount",
-            len(self._workers),
-        )
+        logger.info(action, logger.LogResult.in_progress, "processes-amount", len(self._workers))
         workers = list(self._workers.values())
         for worker in workers:
             if worker.process.is_alive():

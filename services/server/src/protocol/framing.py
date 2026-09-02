@@ -1,11 +1,10 @@
 import socket
-from dataclasses import dataclass
 from enum import IntEnum
 
 import safe_socket
 
 HEADER_SIZE = 5
-_MAX_ENCODED_PAYLOAD_LENGTH = (1 << 32) - 1
+_MAX_ENCODED_PAYLOAD_LENGTH = 4294967295
 
 
 class MessageType(IntEnum):
@@ -20,12 +19,12 @@ class MessageType(IntEnum):
     ERROR = 0xFF
 
 
-@dataclass(frozen=True)
 class Message:
     """A decoded frame containing a known type and its raw payload."""
 
-    type: MessageType
-    payload: bytes
+    def __init__(self, message_type: MessageType, payload: bytes) -> None:
+        self.type = message_type
+        self.payload = payload
 
 
 def _as_message_type(value: MessageType | int) -> MessageType:
@@ -41,16 +40,10 @@ def _validate_payload_size(payload_size: int) -> None:
     """Ensure a payload length fits in the header's uint32 field."""
 
     if payload_size > _MAX_ENCODED_PAYLOAD_LENGTH:
-        raise ValueError(
-            f"payload length {payload_size} cannot be represented by uint32"
-        )
+        raise ValueError(f"payload length {payload_size} cannot be represented by uint32")
 
 
-def send_message(
-    sock: socket.socket,
-    message_type: MessageType,
-    payload: bytes = b"",
-) -> None:
+def send_message(sock: socket.socket, message_type: MessageType, payload: bytes = b"") -> None:
     """Frame and transfer one complete protocol message."""
 
     normalized_type = _as_message_type(message_type)

@@ -1,8 +1,8 @@
 """Primitive values shared by protocol payload codecs."""
 
-MAX_STRING_SIZE = (1 << 16) - 1
-MAX_UINT32 = (1 << 32) - 1
-MAX_UINT64 = (1 << 64) - 1
+MAX_STRING_SIZE = 65535
+MAX_UINT32 = 4294967295
+MAX_UINT64 = 18446744073709551615
 
 
 def encode_uint(field_name: str, value: int, size: int, maximum: int) -> bytes:

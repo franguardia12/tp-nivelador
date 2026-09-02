@@ -1,8 +1,6 @@
 """Inter-process locking for the file-backed Lottery implementation."""
 
 import fcntl
-from collections.abc import Generator
-from contextlib import contextmanager
 
 
 class LotteryFileLock:
@@ -11,27 +9,32 @@ class LotteryFileLock:
     def __init__(self, lock_path: str) -> None:
         self._lock_path = lock_path
 
-    @contextmanager
-    def read(self) -> Generator[None]:
-        """Acquire a shared lock, allowing other readers but excluding writers."""
+    def acquire_read(self):
+        """Acquire and return a shared-lock file descriptor."""
 
-        with self._acquire(fcntl.LOCK_SH):
-            yield
+        return self._acquire(fcntl.LOCK_SH)
 
-    @contextmanager
-    def write(self) -> Generator[None]:
-        """Acquire an exclusive lock for a Lottery storage mutation."""
+    def acquire_write(self):
+        """Acquire and return an exclusive-lock file descriptor."""
 
-        with self._acquire(fcntl.LOCK_EX):
-            yield
+        return self._acquire(fcntl.LOCK_EX)
 
-    @contextmanager
-    def _acquire(self, operation: int) -> Generator[None]:
-        """Hold the requested advisory lock and always release its descriptor."""
+    def _acquire(self, operation: int):
+        """Open the lock file and close it if acquisition is interrupted."""
 
-        with open(self._lock_path, "r", encoding="utf-8") as lock_file:
+        lock_file = open(self._lock_path, "r", encoding="utf-8")
+        try:
             fcntl.flock(lock_file.fileno(), operation)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        except BaseException:
+            lock_file.close()
+            raise
+        return lock_file
+
+    @staticmethod
+    def release(lock_file) -> None:
+        """Release a previously acquired lock and always close its descriptor."""
+
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_file.close()

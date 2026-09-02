@@ -28,7 +28,8 @@ class WinnerSender:
         winner_count = 0
         # Lottery exposes a file-backed iterator. The shared lock covers the
         # complete iteration, excluding writers while allowing other readers.
-        with self._lottery_file_lock.read():
+        lock_file = self._lottery_file_lock.acquire_read()
+        try:
             for bet in self._lottery.load_bets():
                 if bet.agency_id != agency_id or not self._lottery.has_won(bet):
                     continue
@@ -41,6 +42,8 @@ class WinnerSender:
                     encode_bet(bet),
                 )
                 winner_count += 1
+        finally:
+            self._lottery_file_lock.release(lock_file)
 
         protocol.send_message(
             client_socket,

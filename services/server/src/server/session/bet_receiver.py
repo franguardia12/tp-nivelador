@@ -87,8 +87,11 @@ class BetReceiver:
                     detail=str(error),
                 ) from error
 
-            with self._lottery_file_lock.write():
+            lock_file = self._lottery_file_lock.acquire_write()
+            try:
                 self._lottery.store_bets(bets)
+            finally:
+                self._lottery_file_lock.release(lock_file)
             self._send_ack(client_socket, protocol.MessageType.BETS, len(bets))
             stored_count += len(bets)
 
