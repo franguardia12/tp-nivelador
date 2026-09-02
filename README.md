@@ -2,6 +2,89 @@
 
 Franco Guardia - 109374
 
+## Resolución del ejercicio 1
+
+Se mantuvo el cliente provisto inicialmente (`client_0`) y se definieron cinco
+clientes adicionales (`client_1` a `client_5`) en `docker-compose.yaml`. Todos se
+construyen a partir del mismo `Dockerfile`, dependen del servidor y utilizan la
+misma dirección y puerto para conectarse. Cada contenedor posee un nombre y un
+`AGENCY_ID` diferentes, lo que permite distinguir sus ejecuciones en los logs.
+
+## Resolución del ejercicio 2
+
+Se publicó el puerto TCP `5678` del contenedor del servidor en el mismo puerto
+del equipo anfitrión. De esta manera, el servidor continúa siendo accesible para
+los clientes dentro de la red de Docker y también permite establecer una conexión
+desde el host mediante `localhost:5678`.
+
+## Resolución del ejercicio 3
+
+Cada cliente procesa su archivo CSV de entrada registro por registro, sin cargarlo
+completo en memoria, y persiste en otro CSV los ganadores informados por el servidor.
+Los archivos se configuran mediante `INPUT_FILE` y `OUTPUT_FILE`; los directorios
+`input` y `output` se montan como volúmenes para permitir modificar las entradas
+sin reconstruir las imágenes y conservar las salidas en el equipo anfitrión. Cada
+agencia utiliza archivos propios.
+
+## Resolución del ejercicio 4
+
+Se modificaron las funciones `send_all` y `recv_all` del cliente y del servidor
+para repetir las operaciones de escritura y lectura hasta transferir la cantidad
+total de bytes esperada. Cada iteración continúa desde el desplazamiento ya
+procesado, por lo que contempla correctamente los casos de _short write_ y _short
+read_ sin reenviar ni sobrescribir datos. Los errores de los sockets se propagan
+dado que podrían ser permanentes.
+
+## Resolución del ejercicio 5
+
+Se reemplazó el _echo_ inicial por un protocolo binario propio sobre una conexión
+TCP persistente por cliente. Cada mensaje contiene un encabezado de cinco bytes:
+un byte de tipo y cuatro bytes para la longitud del payload. Los mensajes
+`AGENCY`, `BETS`, `END_BETS`, `ACK`, `WINNER`, `WINNERS_END` y `ERROR`, junto con
+sus payloads, se serializan explícitamente.
+
+El cliente registra su agencia, lee el archivo de entrada de manera incremental y
+envía mensajes de apuestas, cada uno confirmado por el servidor después de su
+almacenamiento. Al finalizar, notifica al servidor y queda bloqueado sin consumir
+CPU esperando los resultados. El servidor persiste las apuestas mediante
+`Lottery` y transmite una secuencia `WINNER` con únicamente los ganadores de esa
+agencia. Un mensaje `WINNERS_END` informa la cantidad total y permite al cliente
+validar que recibió la secuencia completa antes de finalizar el archivo de salida.
+
+## Resolución del ejercicio 6
+
+Se incorporó el envío de apuestas por lotes configurables mediante la variable de
+entorno `BATCH_SIZE`. El cliente continúa leyendo el archivo de entrada de manera
+incremental, acumula como máximo esa cantidad de registros y envía cada grupo en
+un único mensaje `BETS`. Al llegar al final también transmite el último lote aunque
+contenga menos registros. Los registros inválidos detectados durante la lectura se
+omiten y se informa el motivo mediante un log.
+
+El servidor deserializa y valida el mensaje completo antes de almacenar el lote
+mediante una única llamada a `Lottery.store_bets`. Solamente después de que esa
+operación finaliza responde con un `ACK` que contiene la cantidad procesada, valor
+que el cliente verifica antes de avanzar al siguiente lote.
+
+## Resolución del ejercicio 7
+
+El servidor mantiene un proceso padre coordinador y atiende cada conexión en un
+proceso hijo independiente. La creación de workers se realiza con
+`multiprocessing`, usando explícitamente el método `spawn`. Cada worker posee un
+`Pipe` con el padre y este espera de manera bloqueante las conexiones, las
+notificaciones y la terminación de procesos mediante
+`multiprocessing.connection.wait`. Los procesos terminados se recolectan con
+`join`, se eliminan del registro y se cierran sus recursos.
+
+Cuando una agencia envía `END_BETS`, el worker notifica su identificador al padre
+mediante el pipe y queda bloqueado sin polling. El coordinador forma rondas
+sucesivas de exactamente `AGENCY_QUORUM_MIN` agencias distintas y libera solamente
+los workers seleccionados; los demás permanecen esperando una ronda posterior.
+Una nueva ronda completa puede liberarse aunque otra siga procesándose. Todos los
+accesos al archivo de `Lottery` se protegen con un único `multiprocessing.Lock`
+compartido por los procesos y utilizado como context manager, evitando carreras a
+cambio de serializar también las lecturas. Cada conexión recibe únicamente los
+ganadores de su propia agencia.
+
 ## Resolución del ejercicio 8
 
 Cliente y servidor capturan `SIGTERM` y lo traducen a su flujo normal de
@@ -11,8 +94,8 @@ salida se cierran mediante `defer` y el buffer CSV se vacía antes de retornar.
 
 En el servidor, la señal interrumpe la espera del proceso padre y activa el cierre
 del listener y del coordinador. Este envía `SIGTERM` a los workers, cuyos handlers
-desenrollan la pila para liberar sockets, conexiones IPC y el lock compartido. El padre
-envía la señal a todos antes de esperarlos y luego ejecuta `join`.
+desenrollan la pila para liberar sockets, conexiones IPC y el mutex interproceso.
+El padre envía la señal a todos antes de esperarlos y luego ejecuta `join`.
 
 ## Introducción
 
