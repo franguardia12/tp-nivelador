@@ -7,7 +7,7 @@ from multiprocessing.connection import Connection
 import logger
 from lottery import Lottery
 
-from .lottery_file_lock import LotteryFileLock
+from .lottery_lock import LotteryLock
 from .session.client_session import ClientSession
 from .shutdown import ShutdownRequested, install_sigterm_handler, restore_sigterm_handler
 
@@ -35,14 +35,14 @@ class ClientWorker:
         self.process.close()
 
 
-def _serve_client_process(client_socket: socket.socket, lottery: Lottery, lottery_file_lock: LotteryFileLock, 
+def _serve_client_process(client_socket: socket.socket, lottery: Lottery, lottery_lock: LotteryLock, 
                           coordinator_connection: Connection) -> None:
     """Own one client socket and its coordinator connection in a child process."""
 
     previous_sigterm_handler = install_sigterm_handler()
     try:
         with coordinator_connection, client_socket:
-            ClientSession(lottery, lottery_file_lock, coordinator_connection).run(client_socket)
+            ClientSession(lottery, lottery_lock, coordinator_connection).run(client_socket)
     except ShutdownRequested:
         logger.info("client-process-shutdown", logger.LogResult.success)
     finally:
@@ -52,9 +52,9 @@ def _serve_client_process(client_socket: socket.socket, lottery: Lottery, lotter
 class ClientWorkerRegistry:
     """Own all worker processes and their parent-side operating-system resources."""
 
-    def __init__(self, lottery: Lottery, lottery_file_lock: LotteryFileLock) -> None:
+    def __init__(self, lottery: Lottery, lottery_lock: LotteryLock) -> None:
         self._lottery = lottery
-        self._lottery_file_lock = lottery_file_lock
+        self._lottery_lock = lottery_lock
         # Spawn transfers only explicitly supplied resources and avoids
         # inheriting the listener or connections belonging to earlier clients.
         self._process_context = multiprocessing.get_context("spawn")
@@ -66,7 +66,7 @@ class ClientWorkerRegistry:
         parent_connection, child_connection = self._process_context.Pipe(duplex=True)
         process = self._process_context.Process(target=_serve_client_process, args=(client_socket, 
                                                                                     self._lottery,
-                                                                                    self._lottery_file_lock,
+                                                                                    self._lottery_lock,
                                                                                     child_connection), 
                                                 name=f"client-{client_socket.fileno()}", daemon=False)
         try:

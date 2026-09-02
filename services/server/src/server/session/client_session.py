@@ -7,7 +7,7 @@ import logger
 import protocol
 from lottery import Lottery
 
-from ..lottery_file_lock import LotteryFileLock
+from ..lottery_lock import LotteryLock
 from ..quorum_messages import notify_arrival_and_wait
 from ..shutdown import ShutdownRequested
 from .bet_receiver import BetReceiver
@@ -18,10 +18,10 @@ from .winner_sender import WinnerSender
 class ClientSession:
     """Coordinate the input, quorum and output phases of one connection."""
 
-    def __init__(self, lottery: Lottery, lottery_file_lock: LotteryFileLock, 
+    def __init__(self, lottery: Lottery, lottery_lock: LotteryLock, 
                  coordinator_connection: Connection) -> None:
-        self._bet_receiver = BetReceiver(lottery, lottery_file_lock)
-        self._winner_sender = WinnerSender(lottery, lottery_file_lock)
+        self._bet_receiver = BetReceiver(lottery, lottery_lock)
+        self._winner_sender = WinnerSender(lottery, lottery_lock)
         self._coordinator_connection = coordinator_connection
 
     def _wait_for_quorum(self, agency_id: int) -> None:

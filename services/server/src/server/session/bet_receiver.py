@@ -6,16 +6,16 @@ import protocol
 from lottery import Lottery
 from protocol.bets import decode_bets
 
-from ..lottery_file_lock import LotteryFileLock
+from ..lottery_lock import LotteryLock
 from .errors import ClientSessionError, receive_message, unexpected_message
 
 
 class BetReceiver:
     """Receive, validate and persist an agency's complete bet stream."""
 
-    def __init__(self, lottery: Lottery, lottery_file_lock: LotteryFileLock) -> None:
+    def __init__(self, lottery: Lottery, lottery_lock: LotteryLock) -> None:
         self._lottery = lottery
-        self._lottery_file_lock = lottery_file_lock
+        self._lottery_lock = lottery_lock
 
     @staticmethod
     def _send_ack(client_socket: socket.socket, acknowledged_type: protocol.MessageType, 
@@ -69,11 +69,8 @@ class BetReceiver:
                 raise ClientSessionError(failed_type=message.type, code=protocol.ErrorCode.INVALID_DATA, 
                                          detail=str(error)) from error
 
-            lock_file = self._lottery_file_lock.acquire_write()
-            try:
+            with self._lottery_lock.hold():
                 self._lottery.store_bets(bets)
-            finally:
-                self._lottery_file_lock.release(lock_file)
             self._send_ack(client_socket, protocol.MessageType.BETS, len(bets))
             stored_count += len(bets)
 

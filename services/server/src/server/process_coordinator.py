@@ -7,7 +7,7 @@ import logger
 from lottery import Lottery
 
 from .client_workers import ClientWorker, ClientWorkerRegistry
-from .lottery_file_lock import LotteryFileLock
+from .lottery_lock import LotteryLock
 from .quorum import AgencyRound, AgencyRounds
 from .quorum_messages import receive_arrival, send_release
 
@@ -15,9 +15,9 @@ from .quorum_messages import receive_arrival, send_release
 class ProcessCoordinator:
     """Synchronize completed agencies while delegating worker lifecycle."""
 
-    def __init__(self, lottery: Lottery, lottery_file_lock: LotteryFileLock, agency_quorum_min: int) -> None:
+    def __init__(self, lottery: Lottery, lottery_lock: LotteryLock, agency_quorum_min: int) -> None:
         self._agency_rounds = AgencyRounds(agency_quorum_min)
-        self._workers = ClientWorkerRegistry(lottery, lottery_file_lock)
+        self._workers = ClientWorkerRegistry(lottery, lottery_lock)
 
     def start_client(self, client_socket: socket.socket) -> None:
         """Start a dedicated process for one accepted client connection."""

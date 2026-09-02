@@ -129,16 +129,21 @@ Se eligió multiprocessing para permitir paralelismo real entre sesiones y evita
 que el GIL de CPython condicione la ejecución de sus tramos de procesamiento. No se
 utilizan `Queue`, `Manager`, futures, asyncio ni memoria Python compartida. La
 biblioteca `multiprocessing` crea los procesos y proporciona los objetos `Pipe` y
-`Connection` empleados para el IPC. Los file locks continúan actuando directamente
-sobre el almacenamiento del sistema operativo.
+`Connection` empleados para el IPC, además del `Lock` que protege el almacenamiento
+compartido.
 
 ### Protección de Lottery
 
-Los accesos al almacenamiento de `Lottery` se coordinan mediante `flock` sobre un 
-archivo de lock asociado. Cada llamada a `store_bets` mantiene un lock exclusivo hasta finalizar. La iteración de `load_bets` mantiene un lock compartido durante todo el 
-recorrido: varios procesos pueden leer ganadores simultáneamente, pero un escritor no 
-puede modificar el CSV mientras está siendo interpretado. Las apuestas continúan 
-procesándose de manera incremental y no se carga el archivo completo en memoria.
+Los accesos al almacenamiento de `Lottery` se coordinan mediante un único
+`multiprocessing.Lock`, creado con el mismo contexto `spawn` que los workers y
+compartido con todos ellos. Cada llamada a `store_bets` mantiene el lock hasta
+finalizar. La iteración de `load_bets` también lo conserva durante todo el recorrido,
+por lo que ningún proceso puede modificar ni interpretar simultáneamente un CSV
+parcial. Ambas secciones críticas usan el context manager del propio `Lock`, que lo
+libera al salir del bloque aunque ocurra una excepción. Este mutex simplifica la
+sincronización a cambio de serializar también las
+lecturas de distintas rondas. Las apuestas continúan procesándose de manera
+incremental y no se carga el archivo completo en memoria.
 
 ### Quorum de agencias
 
@@ -270,7 +275,7 @@ sale de `multiprocessing.connection.wait`, cierra el socket de escucha y solicit
 la terminación de todos los workers mediante `Process.terminate`, que en POSIX les
 entrega la misma señal. Cada hijo instala su propio handler, por lo que la señal
 desenrolla la pila; los context managers y bloques `finally` liberan el socket TCP,
-la `Connection` de IPC y cualquier file lock activo.
+la `Connection` de IPC y el lock de `Lottery` si el worker lo había adquirido.
 
 El coordinador propaga `SIGTERM` a todos los workers antes de comenzar a esperarlos,
 por lo que sus limpiezas avanzan concurrentemente. Luego ejecuta `join` sobre cada
