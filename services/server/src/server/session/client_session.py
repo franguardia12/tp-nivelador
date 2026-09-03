@@ -18,8 +18,12 @@ from .winner_sender import WinnerSender
 class ClientSession:
     """Coordinate the input, quorum and output phases of one connection."""
 
-    def __init__(self, lottery: Lottery, lottery_lock: LotteryLock, 
-                 coordinator_connection: Connection) -> None:
+    def __init__(
+        self,
+        lottery: Lottery,
+        lottery_lock: LotteryLock,
+        coordinator_connection: Connection,
+    ) -> None:
         self._bet_receiver = BetReceiver(lottery, lottery_lock)
         self._winner_sender = WinnerSender(lottery, lottery_lock)
         self._coordinator_connection = coordinator_connection
@@ -48,10 +52,24 @@ class ClientSession:
             logger.error(action, logger.LogResult.fail, "err", error)
             return
         except Exception as error:
-            try_send_error(client_socket, ClientSessionError(failed_type=0, code=protocol.ErrorCode.INTERNAL, 
-                                                             detail="internal server error"))
+            try_send_error(
+                client_socket,
+                ClientSessionError(
+                    failed_type=0,
+                    code=protocol.ErrorCode.INTERNAL,
+                    detail="internal server error",
+                ),
+            )
             logger.error(action, logger.LogResult.fail, "err", error)
             return
 
-        logger.info(action, logger.LogResult.success, "agency-id", agency_id, "bets-amount", stored_count, 
-                    "winners-amount", winner_count)
+        logger.info(
+            action,
+            logger.LogResult.success,
+            "agency-id",
+            agency_id,
+            "bets-amount",
+            stored_count,
+            "winners-amount",
+            winner_count,
+        )

@@ -38,7 +38,10 @@ def decode_agency(payload: bytes) -> int:
     """Deserialize a payload containing exactly one agency identifier."""
 
     if len(payload) != AGENCY_PAYLOAD_SIZE:
-        raise ValueError(f"agency payload length is {len(payload)}, "f"expected {AGENCY_PAYLOAD_SIZE}")
+        raise ValueError(
+            f"agency payload length is {len(payload)}, "
+            f"expected {AGENCY_PAYLOAD_SIZE}"
+        )
     return int.from_bytes(payload, "big")
 
 
@@ -104,5 +107,11 @@ def encode_error(protocol_error: ErrorPayload) -> bytes:
             f"error detail length {len(detail)} exceeds maximum {MAX_STRING_SIZE}"
         )
 
-    return b"".join([bytes([failed_type]), int(code).to_bytes(2, "big"), len(detail).to_bytes(2, "big"), 
-                     detail])
+    return b"".join(
+        [
+            bytes([failed_type]),
+            int(code).to_bytes(2, "big"),
+            len(detail).to_bytes(2, "big"),
+            detail,
+        ]
+    )

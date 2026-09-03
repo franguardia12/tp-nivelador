@@ -31,9 +31,14 @@ class WinnerSender:
                 if winner_count == _MAX_WINNER_COUNT:
                     raise OverflowError("winner count exceeds uint32")
 
-                protocol.send_message(client_socket, protocol.MessageType.WINNER, encode_bet(bet))
+                protocol.send_message(
+                    client_socket, protocol.MessageType.WINNER, encode_bet(bet)
+                )
                 winner_count += 1
 
-        protocol.send_message(client_socket, protocol.MessageType.WINNERS_END, 
-                              protocol.encode_winners_end(winner_count))
+        protocol.send_message(
+            client_socket,
+            protocol.MessageType.WINNERS_END,
+            protocol.encode_winners_end(winner_count),
+        )
         return winner_count

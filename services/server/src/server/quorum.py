@@ -4,7 +4,9 @@
 class AgencyRound:
     """Exactly one quorum-sized group selected for concurrent processing."""
 
-    def __init__(self, number: int, process_ids: tuple[int, ...], agency_ids: tuple[int, ...]) -> None:
+    def __init__(
+        self, number: int, process_ids: tuple[int, ...], agency_ids: tuple[int, ...]
+    ) -> None:
         self.number = number
         self.process_ids = process_ids
         self.agency_ids = agency_ids
@@ -32,8 +34,9 @@ class AgencyRounds:
     def register(self, process_id: int, agency_id: int) -> int:
         """Queue one completed worker and return the distinct waiting count."""
 
-        if process_id in self._process_rounds or any(waiting_id == process_id 
-                                                     for waiting_id, _ in self._waiting):
+        if process_id in self._process_rounds or any(
+            waiting_id == process_id for waiting_id, _ in self._waiting
+        ):
             raise ValueError(f"process {process_id} is already registered")
 
         self._waiting.append((process_id, agency_id))
@@ -59,8 +62,11 @@ class AgencyRounds:
 
             selected_index_set = set(selected_indexes)
             selected = [self._waiting[index] for index in selected_indexes]
-            self._waiting = [registration for index, registration in enumerate(self._waiting) 
-                             if index not in selected_index_set]
+            self._waiting = [
+                registration
+                for index, registration in enumerate(self._waiting)
+                if index not in selected_index_set
+            ]
 
             self._last_round_number += 1
             round_number = self._last_round_number
@@ -74,7 +80,11 @@ class AgencyRounds:
     def remove_process(self, process_id: int) -> int | None:
         """Remove a stopped worker and return its round when that round finishes."""
 
-        self._waiting = [registration for registration in self._waiting if registration[0] != process_id]
+        self._waiting = [
+            registration
+            for registration in self._waiting
+            if registration[0] != process_id
+        ]
 
         round_number = self._process_rounds.pop(process_id, None)
         if round_number is None:

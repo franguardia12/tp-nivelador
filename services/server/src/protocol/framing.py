@@ -40,10 +40,14 @@ def _validate_payload_size(payload_size: int) -> None:
     """Ensure a payload length fits in the header's uint32 field."""
 
     if payload_size > _MAX_ENCODED_PAYLOAD_LENGTH:
-        raise ValueError(f"payload length {payload_size} cannot be represented by uint32")
+        raise ValueError(
+            f"payload length {payload_size} cannot be represented by uint32"
+        )
 
 
-def send_message(sock: socket.socket, message_type: MessageType, payload: bytes = b"") -> None:
+def send_message(
+    sock: socket.socket, message_type: MessageType, payload: bytes = b""
+) -> None:
     """Frame and transfer one complete protocol message."""
 
     normalized_type = _as_message_type(message_type)

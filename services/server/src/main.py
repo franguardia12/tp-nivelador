@@ -34,8 +34,13 @@ def main():
         try:
             storage.prepare()
             lottery = Lottery(storage.storage_path)
-            server.Server(SERVER_HOST, SERVER_PORT, lottery, server.LotteryLock(),
-                          agency_quorum_min).run()
+            server.Server(
+                SERVER_HOST,
+                SERVER_PORT,
+                lottery,
+                server.LotteryLock(),
+                agency_quorum_min,
+            ).run()
         finally:
             storage.cleanup()
     except server.ShutdownRequested:

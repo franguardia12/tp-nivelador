@@ -53,7 +53,10 @@ def _encode_string(field_name: str, value: str) -> bytes:
     except UnicodeEncodeError as error:
         raise ValueError(f"{field_name} is not valid UTF-8") from error
     if len(encoded_value) > MAX_STRING_SIZE:
-        raise ValueError(f"{field_name} length {len(encoded_value)} " f"exceeds maximum {MAX_STRING_SIZE}")
+        raise ValueError(
+            f"{field_name} length {len(encoded_value)} "
+            f"exceeds maximum {MAX_STRING_SIZE}"
+        )
     return len(encoded_value).to_bytes(2, "big") + encoded_value
 
 
@@ -77,12 +80,15 @@ def _decode_bet(decoder: _BetDecoder, agency_id: int) -> Bet:
 def encode_bet(bet: Bet) -> bytes:
     """Serialize one bet, omitting the connection-scoped agency identifier."""
 
-    return b"".join([_encode_string("first name", bet.first_name), _encode_string("last name", bet.last_name),
-                     encode_uint("document", bet.document, 8, MAX_UINT64), 
-                     _encode_string("birthdate", bet.birthdate),
-                     encode_uint("number", bet.number, 4, MAX_UINT32)
-                    ])
-
+    return b"".join(
+        [
+            _encode_string("first name", bet.first_name),
+            _encode_string("last name", bet.last_name),
+            encode_uint("document", bet.document, 8, MAX_UINT64),
+            _encode_string("birthdate", bet.birthdate),
+            encode_uint("number", bet.number, 4, MAX_UINT32),
+        ]
+    )
 
 
 def decode_bets(payload: bytes, agency_id: int) -> list[Bet]:
@@ -96,7 +102,9 @@ def decode_bets(payload: bytes, agency_id: int) -> list[Bet]:
         raise ValueError("bets payload cannot be empty")
     remaining_size = len(payload) - BETS_COUNT_SIZE
     if count * MINIMUM_ENCODED_BET_SIZE > remaining_size:
-        raise ValueError(f"bet count {count} does not fit in payload of {remaining_size} bytes")
+        raise ValueError(
+            f"bet count {count} does not fit in payload of {remaining_size} bytes"
+        )
 
     decoder = _BetDecoder(payload, offset=BETS_COUNT_SIZE)
     bets = []
@@ -106,5 +114,7 @@ def decode_bets(payload: bytes, agency_id: int) -> list[Bet]:
         except ValueError as error:
             raise ValueError(f"decode bet {index}: {error}") from error
     if decoder.offset != len(payload):
-        raise ValueError(f"bets payload has {len(payload) - decoder.offset} trailing bytes")
+        raise ValueError(
+            f"bets payload has {len(payload) - decoder.offset} trailing bytes"
+        )
     return bets
