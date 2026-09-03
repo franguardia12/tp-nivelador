@@ -75,6 +75,44 @@ menor si el archivo no completa otro lote.
 No se admite una cantidad igual a cero. El servidor decodifica y valida todo el
 payload antes de intentar almacenarlo.
 
+#### `END_BETS`
+
+No posee payload.
+
+#### `ACK`
+
+Contiene el tipo confirmado como `uint8` y la cantidad procesada como `uint32`.
+Para `AGENCY` la cantidad es cero. Para `BETS` debe coincidir con la cantidad de
+apuestas enviada. El servidor envía el `ACK` solamente después de completar la
+operación correspondiente.
+
+#### `WINNER`
+
+Contiene una apuesta serializada. La agencia no se incluye porque el servidor
+envía solamente ganadores asociados a la sesión actual.
+
+#### `WINNERS_END`
+
+Contiene como `uint32` la cantidad total de mensajes `WINNER` enviados. Esto
+permite que el cliente valide que recibió la secuencia completa.
+
+#### `ERROR`
+
+Contiene el tipo de mensaje que falló como `uint8`, un código de error `uint16`,
+la longitud del detalle como `uint16` y el detalle codificado en UTF-8. El tipo
+`0x00` representa un error ocurrido antes de poder identificar el mensaje.
+
+Los códigos definidos son:
+
+| Código | Significado |
+|---:|---|
+| `1` | Encabezado o payload malformado |
+| `2` | Mensaje inesperado para el estado actual |
+| `3` | Datos de agencia o apuesta inválidos |
+| `4` | Error interno durante el procesamiento |
+
+Después de enviar o recibir un `ERROR`, la sesión se considera fallida y se cierra.
+
 ### Procesamiento por lotes
 
 El cliente requiere que `BATCH_SIZE` esté definido y valida que sea un entero
@@ -105,6 +143,39 @@ La interfaz provista por `Lottery` no ofrece una operación de rollback, por lo 
 ante un fallo de escritura el servidor no confirma el lote, aunque tampoco puede
 deshacer registros que el método hubiera alcanzado a persistir antes de informar
 el error.
+
+### Flujo y máquina de estados
+
+El servidor mantiene los siguientes estados por conexión:
+
+1. `WAITING_AGENCY`: solamente acepta `AGENCY` y responde `ACK`.
+2. `RECEIVING_BETS`: acepta cero o más mensajes `BETS`, responde un `ACK` por cada
+   uno y finalmente acepta `END_BETS`.
+3. `WAITING_QUORUM`: registra la agencia terminada y espera a que se alcance
+   `AGENCY_QUORUM_MIN`.
+4. `SENDING_WINNERS`: recorre las apuestas almacenadas, filtra por la agencia de
+   la sesión y aplica la condición de ganador. Envía cada resultado mediante
+   `WINNER` y termina con `WINNERS_END`.
+5. `FINISHED`: la comunicación de la sesión terminó y se cierra el socket.
+
+El diálogo normal es:
+
+```text
+Cliente                                      Servidor
+   | ----------- AGENCY ----------------------> |
+   | <---------- ACK --------------------------- |
+   | -------- BETS (hasta BATCH_SIZE) --------> |
+   | <---------- ACK --------------------------- |
+   |                      ...                    |
+   | ----------- END_BETS --------------------> |
+   |          (espera bloqueante del quorum)     |
+   | <---------- WINNER ------------------------ |
+   |                      ...                    |
+   | <---------- WINNERS_END ------------------- |
+```
+
+Un mensaje fuera de orden produce `ERROR`. La sincronización normal depende del
+intercambio de mensajes y no de esperas temporales prefijadas.
 
 ## Concurrencia y sincronización
 
@@ -163,16 +234,15 @@ notificación y la deja en la cola de la próxima ronda. Cada vez que se alcanza
 mínimo, selecciona exactamente esos workers y les envía un token de un byte. Las
 agencias restantes comienzan a conformar otra ronda.
 
-`Connection` conserva los límites de cada mensaje y el receptor valida que la 
-notificación mida cuatro bytes y que el token sea el acordado. Tanto `recv_bytes` 
-como `multiprocessing.connection.wait` son bloqueantes: no hay busy wait ni períodos
-prefijados. Una nueva ronda completa puede liberarse aunque otras todavía estén
-procesando ganadores, maximizando el paralelismo entre procesos; solamente queda
-bloqueado el grupo incompleto que aún no alcanza el quorum. El padre asocia cada
-PID con su ronda y observa los sentinels para registrar su finalización y recolectar
-todos sus procesos de manera independiente. Los locks compartidos permiten que
-varias rondas lean ganadores concurrentemente, mientras que el lock exclusivo
-continúa impidiendo lecturas durante una escritura.
+`Connection` conserva los límites de cada mensaje y el receptor valida que la
+notificación mida cuatro bytes y que el token sea el acordado. Tanto `recv_bytes`
+como `multiprocessing.connection.wait` son bloqueantes, no hay busy wait. Una nueva 
+ronda completa puede liberarse aunque otra todavía esté procesando ganadores; 
+solamente queda bloqueado el grupo incompleto que aún no alcanza el quorum. El padre 
+asocia cada PID con su ronda y observa los sentinels para registrar su finalización 
+y recolectar todos sus procesos de manera independiente. Los workers liberados avanzan 
+concurrentemente fuera de la sección crítica, mientras que el único `multiprocessing.Lock` 
+serializa cada acceso de lectura o escritura al almacenamiento compartido.
 
 Si quedan menos agencias que el mínimo, sus workers permanecen bloqueados sin
 consumir CPU hasta que lleguen las notificaciones faltantes. El quorum no se
@@ -181,77 +251,6 @@ sistema mediante `SIGTERM` interrumpe esa espera y libera sus recursos.
 
 El sorteo se calcula por sesión y los resultados se filtran por `agency_id`. No se
 realiza un broadcast global de ganadores.
-
-#### `END_BETS`
-
-No posee payload.
-
-#### `ACK`
-
-Contiene el tipo confirmado como `uint8` y la cantidad procesada como `uint32`.
-Para `AGENCY` la cantidad es cero. Para `BETS` debe coincidir con la cantidad de
-apuestas enviada. El servidor envía el `ACK` solamente después de completar la
-operación correspondiente.
-
-#### `WINNER`
-
-Contiene una apuesta serializada. La agencia no se incluye porque el servidor
-envía solamente ganadores asociados a la sesión actual.
-
-#### `WINNERS_END`
-
-Contiene como `uint32` la cantidad total de mensajes `WINNER` enviados. Esto
-permite que el cliente valide que recibió la secuencia completa.
-
-#### `ERROR`
-
-Contiene el tipo de mensaje que falló como `uint8`, un código de error `uint16`,
-la longitud del detalle como `uint16` y el detalle codificado en UTF-8. El tipo
-`0x00` representa un error ocurrido antes de poder identificar el mensaje.
-
-Los códigos definidos son:
-
-| Código | Significado |
-|---:|---|
-| `1` | Encabezado o payload malformado |
-| `2` | Mensaje inesperado para el estado actual |
-| `3` | Datos de agencia o apuesta inválidos |
-| `4` | Error interno durante el procesamiento |
-
-Después de enviar o recibir un `ERROR`, la sesión se considera fallida y se cierra.
-
-### Flujo y máquina de estados
-
-El servidor mantiene los siguientes estados por conexión:
-
-1. `WAITING_AGENCY`: solamente acepta `AGENCY` y responde `ACK`.
-2. `RECEIVING_BETS`: acepta cero o más mensajes `BETS`, responde un `ACK` por cada
-   uno y finalmente acepta `END_BETS`.
-3. `WAITING_QUORUM`: registra la agencia terminada y espera a que se alcance
-   `AGENCY_QUORUM_MIN`.
-4. `SENDING_WINNERS`: recorre las apuestas almacenadas, filtra por la agencia de
-   la sesión y aplica la condición de ganador. Envía cada resultado mediante
-   `WINNER` y termina con `WINNERS_END`.
-5. `FINISHED`: la comunicación de la sesión terminó y se cierra el socket.
-
-El diálogo normal es:
-
-```text
-Cliente                                      Servidor
-   | ----------- AGENCY ----------------------> |
-   | <---------- ACK --------------------------- |
-   | -------- BETS (hasta BATCH_SIZE) --------> |
-   | <---------- ACK --------------------------- |
-   |                      ...                    |
-   | ----------- END_BETS --------------------> |
-   |          (espera bloqueante del quorum)     |
-   | <---------- WINNER ------------------------ |
-   |                      ...                    |
-   | <---------- WINNERS_END ------------------- |
-```
-
-Un mensaje fuera de orden produce `ERROR`. La sincronización normal depende del
-intercambio de mensajes y no de esperas temporales prefijadas.
 
 ### Finalización graceful
 
