@@ -285,11 +285,14 @@ crear su directorio interno, también lo elimina.
 ### Manejo de errores y recursos
 
 La finalización de una lectura o escritura se determina al acumular exactamente la
-cantidad esperada de bytes. Si una operación no avanza pero tampoco informa un
-error, no se considera completa mientras todavía falten bytes y se vuelve a
-intentar. Los errores informados por el socket antes de completar un encabezado 
-o payload se propagan. Cuando la conexión todavía es utilizable, el servidor intenta 
-enviar un mensaje `ERROR`; luego registra el problema y cierra la sesión.
+cantidad esperada de bytes. Las operaciones parciales continúan desde el
+desplazamiento alcanzado. En recepción, un resultado vacío antes de completar esa
+cantidad indica que el peer cerró la conexión y se informa como EOF prematuro. En
+escritura, un resultado de cero sin una excepción no se considera completo mientras
+todavía falten bytes. Los errores informados por el socket antes de completar un
+encabezado o payload se propagan. Cuando la conexión todavía es utilizable, el
+servidor intenta enviar un mensaje `ERROR`; luego registra el problema y cierra la
+sesión.
 
 Los errores se devuelven por el flujo normal de las funciones, sin forzar la salida
 desde los módulos internos. Los archivos y sockets quedan bajo mecanismos de

@@ -4,8 +4,8 @@ import socket
 def recv_all(sock: socket.socket, size: int) -> bytes:
     """Receive exactly size bytes, retrying successful partial operations.
 
-    Socket exceptions are propagated. A zero-byte result without an exception is
-    treated as no progress while bytes are still pending.
+    Socket exceptions are propagated. An empty result before the requested size
+    is complete indicates that the peer closed the connection prematurely.
     """
 
     if size < 0:
@@ -18,6 +18,8 @@ def recv_all(sock: socket.socket, size: int) -> bytes:
         # Socket errors are deliberately propagated. Only successful partial
         # receives are retried; retrying an arbitrary error could loop forever.
         chunk = sock.recv(recv_size)
+        if chunk == b"":
+            raise EOFError(f"unexpected EOF after {len(data)} of {size} bytes received")
 
         data.extend(chunk)
 
