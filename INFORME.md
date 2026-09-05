@@ -212,9 +212,27 @@ finalizar. La iteración de `load_bets` también lo conserva durante todo el rec
 por lo que ningún proceso puede modificar ni interpretar simultáneamente un CSV
 parcial. Ambas secciones críticas usan el context manager del propio `Lock`, que lo
 libera al salir del bloque aunque ocurra una excepción. Este mutex simplifica la
-sincronización a cambio de serializar también las
-lecturas de distintas rondas. Las apuestas continúan procesándose de manera
-incremental y no se carga el archivo completo en memoria.
+sincronización a cambio de serializar también las lecturas de distintas rondas.
+Las apuestas continúan procesándose de manera incremental y no se carga el archivo
+completo en memoria.
+
+La sección crítica de lectura abarca el `for` completo porque `load_bets` devuelve
+un generador que conserva abierto el CSV y obtiene una apuesta por iteración.
+Liberar el lock entre apuestas o entre lotes permitiría escrituras durante el
+recorrido y la ronda dejaría de observar una vista consistente del almacenamiento.
+Mantenerlo adquirido durante los envíos puede prolongar la espera de otros workers
+si un cliente recibe lentamente, pero evita esa carrera sin acumular todos los
+ganadores en memoria.
+
+Se evaluó materializar primero la lista de ganadores, pero su tamaño no está
+acotado. Un batching interno limitaría la memoria de cada lote, aunque no resolvería
+la consistencia entre lotes y requeriría elegir un límite adicional no solicitado.
+También sería posible copiar el CSV a un archivo snapshot bajo el lock y enviar
+después de liberarlo: conservaría memoria RAM acotada y separaría la red de la
+sección crítica, a cambio de espacio en disco proporcional a la entrada, más I/O y
+un ciclo adicional de creación y limpieza de archivos. Dado el alcance del trabajo,
+se priorizó la alternativa actual por su menor complejidad, consistencia y
+procesamiento incremental.
 
 ### Quorum de agencias
 
@@ -236,13 +254,14 @@ agencias restantes comienzan a conformar otra ronda.
 
 `Connection` conserva los límites de cada mensaje y el receptor valida que la
 notificación mida cuatro bytes y que el token sea el acordado. Tanto `recv_bytes`
-como `multiprocessing.connection.wait` son bloqueantes, no hay busy wait. Una nueva 
-ronda completa puede liberarse aunque otra todavía esté procesando ganadores; 
-solamente queda bloqueado el grupo incompleto que aún no alcanza el quorum. El padre 
-asocia cada PID con su ronda y observa los sentinels para registrar su finalización 
-y recolectar todos sus procesos de manera independiente. Los workers liberados avanzan 
-concurrentemente fuera de la sección crítica, mientras que el único `multiprocessing.Lock` 
-serializa cada acceso de lectura o escritura al almacenamiento compartido.
+como `multiprocessing.connection.wait` son bloqueantes, no hay busy wait. Una nueva
+ronda completa puede liberarse aunque otra todavía esté procesando ganadores;
+solamente queda bloqueado el grupo incompleto que aún no alcanza el quorum. El padre
+asocia cada PID con su ronda y observa los sentinels para registrar su finalización
+y recolectar todos sus procesos de manera independiente. Los workers liberados
+avanzan concurrentemente fuera de la sección crítica, mientras que el único
+`multiprocessing.Lock` serializa cada acceso de lectura o escritura al almacenamiento
+compartido.
 
 Si quedan menos agencias que el mínimo, sus workers permanecen bloqueados sin
 consumir CPU hasta que lleguen las notificaciones faltantes. El quorum no se
