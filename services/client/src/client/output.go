@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/betcsv"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
 )
 
@@ -15,8 +16,13 @@ func (client *Client) receiveWinners(output io.Writer) (receivedCount uint32, er
 	writer := csv.NewWriter(output)
 	defer func() {
 		writer.Flush()
-		if flushErr := writer.Error(); flushErr != nil && err == nil {
-			err = fmt.Errorf("flush winners: %w", flushErr)
+		if flushErr := writer.Error(); flushErr != nil {
+			flushErr = fmt.Errorf("flush winners: %w", flushErr)
+			if err == nil {
+				err = flushErr
+				return
+			}
+			logger.Error("flush-winners", logger.Fail, "err", flushErr)
 		}
 	}()
 
